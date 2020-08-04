@@ -72,7 +72,7 @@ def buckets_insert():
         utils.ToProtoDict(payload), resources.Bucket(), ignore_unknown_fields=True
     )
     utils.InsertBucket(bucket)
-    return MessageToDict(bucket)
+    return utils.RemoveFixParseTime(MessageToDict(bucket))
 
 
 @gcs.route("/b/<bucket_name>")
@@ -93,7 +93,7 @@ def buckets_update(bucket_name):
     bucket = bucket["metadata"]
     bucket.Clear()
     bucket = ParseDict(utils.ToProtoDict(payload), bucket, ignore_unknown_fields=True)
-    return MessageToDict(bucket)
+    return utils.RemoveFixParseTime(MessageToDict(bucket))
 
 
 @gcs.route("/b/<bucket_name>", methods=["PATCH"])
@@ -105,7 +105,16 @@ def buckets_patch(bucket_name):
         return "Bucket %s does not exist" % bucket_name, 404
     bucket = bucket["metadata"]
     bucket = ParseDict(utils.ToProtoDict(payload), bucket, ignore_unknown_fields=True)
-    return MessageToDict(bucket)
+    return utils.RemoveFixParseTime(MessageToDict(bucket))
+
+
+@gcs.route("/b/<bucket_name>", methods=["DELETE"])
+def buckets_delete(bucket_name):
+    bucket = utils.LookupBucket(bucket_name)
+    if bucket is None:
+        return "Bucket %s does not exist" % bucket_name, 404
+    utils.DeleteBucket(bucket_name)
+    return ""
 
 
 application = DispatcherMiddleware(root, {GCS_HANDLER_PATH: gcs})

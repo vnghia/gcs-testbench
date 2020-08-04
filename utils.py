@@ -44,6 +44,28 @@ def FixParseTime(payload):
                     ] += "T00:00:00+00:00"
 
 
+def RemoveFixParseTime(payload):
+    if payload.get("lifecycle") is not None:
+        if payload.get("lifecycle").get("rule") is not None:
+            if payload.get("lifecycle").get("rule")[0].get("condition") is not None:
+                if (
+                    payload.get("lifecycle")
+                    .get("rule")[0]
+                    .get("condition")
+                    .get("createdBefore")
+                    is not None
+                ):
+                    payload.get("lifecycle").get("rule")[0].get("condition")[
+                        "createdBefore"
+                    ] = (
+                        payload.get("lifecycle")
+                        .get("rule")[0]
+                        .get("condition")["createdBefore"]
+                        .replace("T00:00:00Z", "")
+                    )
+    return payload
+
+
 # def ToRestDict(source):
 #     destination = {}
 #     for key in source:
@@ -73,3 +95,7 @@ def AllBuckets():
 def LookupBucket(bucket_name):
     bucket = GCS_BUCKETS.get(bucket_name)
     return bucket
+
+
+def DeleteBucket(bucket_name):
+    del GCS_BUCKETS[bucket_name]
