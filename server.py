@@ -5,7 +5,7 @@ import json
 import logging
 
 # common
-from utils import ToProtoDict, InsertBucket, AllBuckets
+import utils
 
 # gRPC
 import grpc
@@ -58,7 +58,7 @@ gcs.debug = True
 def buckets_list():
     """Implement the 'Buckets: list' API: return the Buckets in a project."""
     result = resources.ListBucketsResponse(next_page_token="", items=[])
-    for name, b in AllBuckets():
+    for name, b in utils.AllBuckets():
         result.items.append(b["metadata"])
     return MessageToDict(result)
 
@@ -68,10 +68,18 @@ def buckets_insert():
     """Implement the 'Buckets: insert' API: create a new Bucket."""
     payload = json.loads(flask.request.data)
     bucket = ParseDict(
-        ToProtoDict(payload), resources.Bucket(), ignore_unknown_fields=True
+        utils.ToProtoDict(payload), resources.Bucket(), ignore_unknown_fields=True
     )
-    InsertBucket(bucket)
+    utils.InsertBucket(bucket)
     return MessageToDict(bucket)
+
+
+@gcs.route("/b/<bucket_name>")
+def buckets_get(bucket_name):
+    bucket = utils.LookupBucket(bucket_name)
+    if bucket is None:
+        return "Bucket %s does not exist" % bucket_name, 404
+    return MessageToDict(bucket["metadata"])
 
 
 application = DispatcherMiddleware(root, {GCS_HANDLER_PATH: gcs})

@@ -47,3 +47,8 @@ def InsertBucket(bucket):
 
 def AllBuckets():
     return GCS_BUCKETS.items()
+
+
+def LookupBucket(bucket_name):
+    bucket = GCS_BUCKETS.get(bucket_name)
+    return bucket
