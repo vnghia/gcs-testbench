@@ -1,7 +1,11 @@
 from concurrent import futures
 
 import argparse
+import json
 import logging
+
+# common
+from utils import ToProtoDict, InsertBucket
 
 # gRPC
 import grpc
@@ -10,6 +14,8 @@ import storage_pb2 as storage
 import storage_pb2_grpc
 import storage_resources_pb2 as resources
 import storage_resources_pb2_grpc
+
+from google.protobuf.json_format import MessageToDict, ParseDict
 
 # REST
 import flask
@@ -42,7 +48,24 @@ def index():
     return "OK"
 
 
-application = DispatcherMiddleware(root,)
+# Define the WSGI application to handle bucket requests.
+GCS_HANDLER_PATH = "/storage/v1"
+gcs = flask.Flask(__name__)
+gcs.debug = True
+
+
+@gcs.route("/b", methods=["POST"])
+def buckets_insert():
+    """Implement the 'Buckets: insert' API: create a new Bucket."""
+    payload = json.loads(flask.request.data)
+    bucket = ParseDict(
+        ToProtoDict(payload), resources.Bucket(), ignore_unknown_fields=True
+    )
+    InsertBucket(bucket)
+    return MessageToDict(bucket)
+
+
+application = DispatcherMiddleware(root, {GCS_HANDLER_PATH: gcs})
 
 
 def rest_serve(port):
