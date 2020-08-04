@@ -6,8 +6,10 @@ import logging
 # gRPC
 import grpc
 
-import helloworld_pb2
-import helloworld_pb2_grpc
+import storage_pb2 as storage
+import storage_pb2_grpc
+import storage_resources_pb2 as resources
+import storage_resources_pb2_grpc
 
 # REST
 import flask
@@ -18,13 +20,13 @@ from werkzeug.middleware.dispatcher import DispatcherMiddleware
 grpc_server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
 
 
-class Greeter(helloworld_pb2_grpc.GreeterServicer):
-    def SayHello(self, request, context):
-        return helloworld_pb2.HelloReply(message="Hello, %s!" % request.name)
+class StorageServicer(storage_pb2_grpc.StorageServicer):
+    def InsertBucket(self, request, context):
+        return resources.Bucket()
 
 
 def grpc_serve(port):
-    helloworld_pb2_grpc.add_GreeterServicer_to_server(Greeter(), grpc_server)
+    storage_pb2_grpc.add_StorageServicer_to_server(StorageServicer(), grpc_server)
     grpc_server.add_insecure_port("[::]:" + port)
     grpc_server.start()
 
