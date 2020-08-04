@@ -15,12 +15,33 @@ def ToSnakeCase(source):
 def ToProtoDict(source):
     destination = {}
     for key in source:
-        if isinstance(source[key], dict):
+        if isinstance(source[key], list):
+            for x in range(len(source[key])):
+                if isinstance(source[key][x], dict):
+                    source[key][x] = ToProtoDict(source[key][x])
+            destination[ToSnakeCase(key)] = source[key]
+        elif isinstance(source[key], dict):
             result = ToProtoDict(source[key])
             destination[ToSnakeCase(key)] = result
         else:
             destination[ToSnakeCase(key)] = source[key]
     return destination
+
+
+def FixParseTime(payload):
+    if payload.get("lifecycle") is not None:
+        if payload.get("lifecycle").get("rule") is not None:
+            if payload.get("lifecycle").get("rule")[0].get("condition") is not None:
+                if (
+                    payload.get("lifecycle")
+                    .get("rule")[0]
+                    .get("condition")
+                    .get("createdBefore")
+                    is not None
+                ):
+                    payload.get("lifecycle").get("rule")[0].get("condition")[
+                        "createdBefore"
+                    ] += "T00:00:00+00:00"
 
 
 # def ToRestDict(source):

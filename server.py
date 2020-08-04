@@ -67,6 +67,7 @@ def buckets_list():
 def buckets_insert():
     """Implement the 'Buckets: insert' API: create a new Bucket."""
     payload = json.loads(flask.request.data)
+    utils.FixParseTime(payload)
     bucket = ParseDict(
         utils.ToProtoDict(payload), resources.Bucket(), ignore_unknown_fields=True
     )
@@ -85,11 +86,24 @@ def buckets_get(bucket_name):
 @gcs.route("/b/<bucket_name>", methods=["PUT"])
 def buckets_update(bucket_name):
     payload = json.loads(flask.request.data)
+    utils.FixParseTime(payload)
     bucket = utils.LookupBucket(bucket_name)
     if bucket is None:
         return "Bucket %s does not exist" % bucket_name, 404
     bucket = bucket["metadata"]
     bucket.Clear()
+    bucket = ParseDict(utils.ToProtoDict(payload), bucket, ignore_unknown_fields=True)
+    return MessageToDict(bucket)
+
+
+@gcs.route("/b/<bucket_name>", methods=["PATCH"])
+def buckets_patch(bucket_name):
+    payload = json.loads(flask.request.data)
+    utils.FixParseTime(payload)
+    bucket = utils.LookupBucket(bucket_name)
+    if bucket is None:
+        return "Bucket %s does not exist" % bucket_name, 404
+    bucket = bucket["metadata"]
     bucket = ParseDict(utils.ToProtoDict(payload), bucket, ignore_unknown_fields=True)
     return MessageToDict(bucket)
 
