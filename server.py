@@ -5,7 +5,7 @@ import json
 import logging
 
 # common
-from utils import ToProtoDict, InsertBucket
+from utils import ToProtoDict, InsertBucket, AllBuckets
 
 # gRPC
 import grpc
@@ -52,6 +52,15 @@ def index():
 GCS_HANDLER_PATH = "/storage/v1"
 gcs = flask.Flask(__name__)
 gcs.debug = True
+
+
+@gcs.route("/b", methods=["GET"])
+def buckets_list():
+    """Implement the 'Buckets: list' API: return the Buckets in a project."""
+    result = resources.ListBucketsResponse(next_page_token="", items=[])
+    for name, b in AllBuckets():
+        result.items.append(b["metadata"])
+    return MessageToDict(result)
 
 
 @gcs.route("/b", methods=["POST"])

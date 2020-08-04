@@ -43,3 +43,7 @@ def make_bucket(metadata):
 
 def InsertBucket(bucket):
     GCS_BUCKETS[bucket.name] = make_bucket(bucket)
+
+
+def AllBuckets():
+    return GCS_BUCKETS.items()
