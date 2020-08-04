@@ -33,22 +33,19 @@ def grpc_serve(port):
 root = flask.Flask(__name__)
 root.debug = True
 
+
 @root.route("/")
 def index():
     """Default handler for the test bench."""
     return "OK"
 
-application = DispatcherMiddleware(
-    root,
-)
+
+application = DispatcherMiddleware(root,)
+
 
 def rest_serve(port):
     serving.run_simple(
-        "localhost",
-        int(port),
-        application,
-        use_reloader=True,
-        use_evalex=True,
+        "localhost", int(port), application, use_reloader=True, use_evalex=True,
     )
 
 
