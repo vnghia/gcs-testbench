@@ -219,6 +219,92 @@ def bucket_acl_delete(bucket_name, entity):
     return "ACL does not exist", 404
 
 
+@gcs.route("/b/<bucket_name>/defaultObjectAcl")
+def bucket_default_object_acl_list(bucket_name):
+    bucket, status_code = utils.CheckBucketPrecondition(bucket_name, flask.request)
+    if status_code != 200:
+        return bucket, status_code
+    result = {"items": []}
+    for item in bucket["metadata"].default_object_acl:
+        result["items"].append(utils.ToRestDict(item, "storage#objectAccessControl"))
+    return result
+
+
+@gcs.route("/b/<bucket_name>/defaultObjectAcl", methods=["POST"])
+def bucket_default_object_acl_create(bucket_name):
+    bucket, status_code = utils.CheckBucketPrecondition(bucket_name, flask.request)
+    if status_code != 200:
+        return bucket, status_code
+    payload = utils.ToProtoDict(flask.request.data)
+    acl = ParseDict(
+        payload, resources.ObjectAccessControl(), ignore_unknown_fields=True
+    )
+    bucket["metadata"].default_object_acl.append(acl)
+    return utils.ToRestDict(acl, "storage#objectAccessControl")
+
+
+@gcs.route("/b/<bucket_name>/defaultObjectAcl/<entity>", methods=["DELETE"])
+def bucket_default_object_acl_delete(bucket_name, entity):
+    bucket, status_code = utils.CheckBucketPrecondition(bucket_name, flask.request)
+    if status_code != 200:
+        return bucket, status_code
+    for i in range(len(bucket["metadata"].default_object_acl)):
+        if bucket["metadata"].default_object_acl[i].entity == entity:
+            del bucket["metadata"].default_object_acl[i]
+            return ""
+    return "ACL does not exist", 404
+
+
+@gcs.route("/b/<bucket_name>/defaultObjectAcl/<entity>")
+def bucket_default_object_acl_get(bucket_name, entity):
+    bucket, status_code = utils.CheckBucketPrecondition(bucket_name, flask.request)
+    if status_code != 200:
+        return bucket, status_code
+    for item in bucket["metadata"].default_object_acl:
+        if item.entity == entity:
+            return utils.ToRestDict(item, "storage#objectAccessControl")
+    return "ACL does not exist", 404
+
+
+@gcs.route("/b/<bucket_name>/defaultObjectAcl/<entity>", methods=["PUT"])
+def bucket_default_object_acl_update(bucket_name, entity):
+    bucket, status_code = utils.CheckBucketPrecondition(bucket_name, flask.request)
+    if status_code != 200:
+        return bucket, status_code
+    for i in range(len(bucket["metadata"].default_object_acl)):
+        if bucket["metadata"].default_object_acl[i].entity == entity:
+            payload = utils.ToProtoDict(flask.request.data)
+            bucket["metadata"].default_object_acl[i].Clear()
+            ParseDict(
+                payload,
+                bucket["metadata"].default_object_acl[i],
+                ignore_unknown_fields=True,
+            )
+            return utils.ToRestDict(
+                bucket["metadata"].default_object_acl[i], "storage#objectAccessControl"
+            )
+    return "ACL does not exist", 404
+
+
+@gcs.route("/b/<bucket_name>/defaultObjectAcl/<entity>", methods=["PATCH"])
+def bucket_default_object_acl_patch(bucket_name, entity):
+    bucket, status_code = utils.CheckBucketPrecondition(bucket_name, flask.request)
+    if status_code != 200:
+        return bucket, status_code
+    for i in range(len(bucket["metadata"].default_object_acl)):
+        if bucket["metadata"].default_object_acl[i].entity == entity:
+            payload = utils.ToProtoDict(flask.request.data)
+            ParseDict(
+                payload,
+                bucket["metadata"].default_object_acl[i],
+                ignore_unknown_fields=True,
+            )
+            return utils.ToRestDict(
+                bucket["metadata"].default_object_acl[i], "storage#objectAccessControl"
+            )
+    return "ACL does not exist", 404
+
+
 application = DispatcherMiddleware(root, {GCS_HANDLER_PATH: gcs})
 
 

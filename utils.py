@@ -99,13 +99,19 @@ def InsertBucketACL(bucket, entity, role):
     )
 
 
+def InsertObjectDefaultACL(bucket, entity, role):
+    bucket.default_object_acl.append(
+        resources.ObjectAccessControl(bucket=bucket.name, role=role, entity=entity)
+    )
+
+
 def make_bucket(metadata):
     InsertBucketACL(metadata, "project-owners-123456789", "OWNER")
     InsertBucketACL(metadata, "project-editors-123456789", "OWNER")
     InsertBucketACL(metadata, "project-viewers-123456789", "READER")
-    InsertBucketACL(metadata, "project-owners-123456789", "OWNER")
-    InsertBucketACL(metadata, "project-editors-123456789", "OWNER")
-    InsertBucketACL(metadata, "project-viewers-123456789", "READER")
+    InsertObjectDefaultACL(metadata, "project-owners-123456789", "OWNER")
+    InsertObjectDefaultACL(metadata, "project-editors-123456789", "OWNER")
+    InsertObjectDefaultACL(metadata, "project-viewers-123456789", "READER")
     return {"metadata": metadata}
 
 
