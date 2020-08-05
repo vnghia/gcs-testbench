@@ -36,6 +36,23 @@ def ToSnakeCase(source):
 #     return destination
 
 
+def ValidateBucketName(bucket_name):
+    valid = True
+    if "." in bucket_name:
+        valid &= len(bucket_name) <= 222
+        valid &= all([len(part) <= 63 for part in bucket_name.split(".")])
+    else:
+        valid &= len(bucket_name) <= 63
+    valid &= re.match("^[a-z0-9][a-z0-9._\\-]+[a-z0-9]$", bucket_name) is not None
+    valid &= not bucket_name.startswith("goog")
+    valid &= re.search("g[0o][0o]g[1l][e3]", bucket_name) is None
+    valid &= (
+        re.match("^[0-9]{1,3}[.][0-9]{1,3}[.][0-9]{1,3}[.][0-9]{1,3}$", bucket_name)
+        is None
+    )
+    return valid
+
+
 def ToSnakeCaseFlat(source):
     destination = FlatterDict()
     source = FlatterDict(source)

@@ -76,6 +76,9 @@ def insert_test_bucket():
 def buckets_list():
     """Implement the 'Buckets: list' API: return the Buckets in a project."""
     insert_test_bucket()
+    project = flask.request.args.get("project")
+    if project is None or project.endswith("-"):
+        return "Invalid or missing project id in `Buckets: list`", 412
     result = {"next_page_token": "", "items": []}
     for name, b in utils.AllBuckets():
         result["items"].append(utils.ToRestDict(b["metadata"], "storage#bucket"))
@@ -86,6 +89,8 @@ def buckets_list():
 def buckets_insert():
     """Implement the 'Buckets: insert' API: create a new Bucket."""
     insert_test_bucket()
+    if not utils.ValidateBucketName(json.loads(flask.request.data)["name"]):
+        return "Bucket name %s is invalid" % json.loads(flask.request.data)["name"], 412
     payload = utils.ToProtoDict(flask.request.data)
     bucket = ParseDict(payload, resources.Bucket(), ignore_unknown_fields=True)
     utils.InsertBucket(bucket)
@@ -377,6 +382,9 @@ def bucket_set_iam_policy(bucket_name):
 
 @gcs.route("/b/<bucket_name>/iam/testPermissions")
 def bucket_test_iam_permissions(bucket_name):
+    bucket, status_code = utils.CheckBucketPrecondition(bucket_name, flask.request)
+    if status_code != 200:
+        return bucket, status_code
     permissions = flask.request.args.getlist("permissions")
     result = {"kind": "storage#testIamPermissionsResponse", "permissions": permissions}
     return result
