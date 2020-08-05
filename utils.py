@@ -1,5 +1,7 @@
 import re
 
+from flatdict import FlatterDict
+
 snake_case = re.compile(r"(?<!^)(?=[A-Z])")
 
 
@@ -12,58 +14,63 @@ def ToSnakeCase(source):
 #     return components[0] + "".join(x.title() for x in components[1:])
 
 
-def ToProtoDict(source):
-    destination = {}
+# def ToProtoDict(source):
+#     destination = {}
+#     for key in source:
+#         if isinstance(source[key], list):
+#             for x in range(len(source[key])):
+#                 if isinstance(source[key][x], dict):
+#                     source[key][x] = ToProtoDict(source[key][x])
+#             destination[ToSnakeCase(key)] = source[key]
+#         elif isinstance(source[key], dict):
+#             result = ToProtoDict(source[key])
+#             destination[ToSnakeCase(key)] = result
+#         else:
+#             destination[ToSnakeCase(key)] = source[key]
+#     return destination
+
+
+def ToSnakeCaseFlat(source):
+    destination = FlatterDict()
+    source = FlatterDict(source)
     for key in source:
-        if isinstance(source[key], list):
-            for x in range(len(source[key])):
-                if isinstance(source[key][x], dict):
-                    source[key][x] = ToProtoDict(source[key][x])
-            destination[ToSnakeCase(key)] = source[key]
-        elif isinstance(source[key], dict):
-            result = ToProtoDict(source[key])
-            destination[ToSnakeCase(key)] = result
-        else:
-            destination[ToSnakeCase(key)] = source[key]
+        destination[ToSnakeCase(key)] = source[key]
     return destination
 
 
-def FixParseTime(payload):
-    if payload.get("lifecycle") is not None:
-        if payload.get("lifecycle").get("rule") is not None:
-            if payload.get("lifecycle").get("rule")[0].get("condition") is not None:
-                if (
-                    payload.get("lifecycle")
-                    .get("rule")[0]
-                    .get("condition")
-                    .get("createdBefore")
-                    is not None
-                ):
-                    payload.get("lifecycle").get("rule")[0].get("condition")[
-                        "createdBefore"
-                    ] += "T00:00:00+00:00"
+def ToBuiltinDict(source):
+    if not isinstance(source, dict):
+        return source
+    destination_dict = dict()
+    destination_list = list()
+    for key, value in source.items():
+        if key.isdecimal():
+            destination_list.append(ToBuiltinDict(value))
+        else:
+            destination_dict[key] = ToBuiltinDict(value)
+    if len(destination_list) != 0:
+        return destination_list
+    else:
+        return destination_dict
 
 
-def RemoveFixParseTime(payload):
-    if payload.get("lifecycle") is not None:
-        if payload.get("lifecycle").get("rule") is not None:
-            if payload.get("lifecycle").get("rule")[0].get("condition") is not None:
-                if (
-                    payload.get("lifecycle")
-                    .get("rule")[0]
-                    .get("condition")
-                    .get("createdBefore")
-                    is not None
-                ):
-                    payload.get("lifecycle").get("rule")[0].get("condition")[
-                        "createdBefore"
-                    ] = (
-                        payload.get("lifecycle")
-                        .get("rule")[0]
-                        .get("condition")["createdBefore"]
-                        .replace("T00:00:00Z", "")
-                    )
-    return payload
+def ToProtoDict(payload):
+    flat = ToSnakeCaseFlat(payload)
+    created_before = flat.get("lifecycle:rule:0:condition:created_before")
+    if created_before is not None:
+        created_before += "T00:00:00+00:00"
+        flat["lifecycle:rule:0:condition:created_before"] = created_before
+    return ToBuiltinDict(flat.as_dict())
+
+
+def ToRestDict(payload):
+    flat = FlatterDict(payload)
+    created_before = flat.get("lifecycle:rule:0:condition:createdBefore")
+    if created_before is not None:
+        flat["lifecycle:rule:0:condition:createdBefore"] = created_before.replace(
+            "T00:00:00Z", ""
+        )
+    return ToBuiltinDict(flat.as_dict())
 
 
 # def ToRestDict(source):

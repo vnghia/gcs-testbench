@@ -66,13 +66,10 @@ def buckets_list():
 @gcs.route("/b", methods=["POST"])
 def buckets_insert():
     """Implement the 'Buckets: insert' API: create a new Bucket."""
-    payload = json.loads(flask.request.data)
-    utils.FixParseTime(payload)
-    bucket = ParseDict(
-        utils.ToProtoDict(payload), resources.Bucket(), ignore_unknown_fields=True
-    )
+    payload = utils.ToProtoDict(json.loads(flask.request.data))
+    bucket = ParseDict(payload, resources.Bucket(), ignore_unknown_fields=True)
     utils.InsertBucket(bucket)
-    return utils.RemoveFixParseTime(MessageToDict(bucket))
+    return utils.ToRestDict(MessageToDict(bucket))
 
 
 @gcs.route("/b/<bucket_name>")
@@ -85,27 +82,25 @@ def buckets_get(bucket_name):
 
 @gcs.route("/b/<bucket_name>", methods=["PUT"])
 def buckets_update(bucket_name):
-    payload = json.loads(flask.request.data)
-    utils.FixParseTime(payload)
+    payload = utils.ToProtoDict(json.loads(flask.request.data))
     bucket = utils.LookupBucket(bucket_name)
     if bucket is None:
         return "Bucket %s does not exist" % bucket_name, 404
     bucket = bucket["metadata"]
     bucket.Clear()
-    bucket = ParseDict(utils.ToProtoDict(payload), bucket, ignore_unknown_fields=True)
-    return utils.RemoveFixParseTime(MessageToDict(bucket))
+    bucket = ParseDict(payload, bucket, ignore_unknown_fields=True)
+    return utils.ToRestDict(MessageToDict(bucket))
 
 
 @gcs.route("/b/<bucket_name>", methods=["PATCH"])
 def buckets_patch(bucket_name):
-    payload = json.loads(flask.request.data)
-    utils.FixParseTime(payload)
+    payload = utils.ToProtoDict(json.loads(flask.request.data))
     bucket = utils.LookupBucket(bucket_name)
     if bucket is None:
         return "Bucket %s does not exist" % bucket_name, 404
     bucket = bucket["metadata"]
-    bucket = ParseDict(utils.ToProtoDict(payload), bucket, ignore_unknown_fields=True)
-    return utils.RemoveFixParseTime(MessageToDict(bucket))
+    bucket = ParseDict(payload, bucket, ignore_unknown_fields=True)
+    return utils.ToRestDict(MessageToDict(bucket))
 
 
 @gcs.route("/b/<bucket_name>", methods=["DELETE"])
