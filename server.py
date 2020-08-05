@@ -1,8 +1,8 @@
 from concurrent import futures
 
 import argparse
-import json
 import logging
+import os
 
 # common
 import utils
@@ -15,7 +15,7 @@ import storage_pb2_grpc
 import storage_resources_pb2 as resources
 import storage_resources_pb2_grpc
 
-from google.protobuf.json_format import MessageToDict, ParseDict
+from google.protobuf.json_format import ParseDict
 
 # REST
 import flask
@@ -54,53 +54,73 @@ gcs = flask.Flask(__name__)
 gcs.debug = True
 
 
+def insert_test_bucket():
+    if len(utils.AllBuckets()) == 0:
+        bucket_name = os.environ.get(
+            "GOOGLE_CLOUD_CPP_STORAGE_TEST_BUCKET_NAME", "test-bucket"
+        )
+        # Enable versioning in the Bucket, the integration tests expect
+        # this to be the case, this brings the metageneration number to 4.
+        bucket = resources.Bucket(
+            name=bucket_name,
+            id=bucket_name,
+            versioning={"enabled": True},
+            metageneration=4,
+        )
+        utils.InsertBucket(bucket)
+
+
 @gcs.route("/b", methods=["GET"])
 def buckets_list():
     """Implement the 'Buckets: list' API: return the Buckets in a project."""
-    result = resources.ListBucketsResponse(next_page_token="", items=[])
+    insert_test_bucket()
+    result = {"next_page_token": "", "items": []}
     for name, b in utils.AllBuckets():
-        result.items.append(b["metadata"])
-    return MessageToDict(result)
+        result["items"].append(utils.ToRestDict(b["metadata"], "storage#bucket"))
+    return result
 
 
 @gcs.route("/b", methods=["POST"])
 def buckets_insert():
     """Implement the 'Buckets: insert' API: create a new Bucket."""
-    payload = utils.ToProtoDict(json.loads(flask.request.data))
+    insert_test_bucket()
+    payload = utils.ToProtoDict(flask.request.data)
     bucket = ParseDict(payload, resources.Bucket(), ignore_unknown_fields=True)
     utils.InsertBucket(bucket)
-    return utils.ToRestDict(MessageToDict(bucket))
+    return utils.ToRestDict(bucket, "storage#bucket")
 
 
 @gcs.route("/b/<bucket_name>")
 def buckets_get(bucket_name):
+    insert_test_bucket()
     bucket = utils.LookupBucket(bucket_name)
     if bucket is None:
         return "Bucket %s does not exist" % bucket_name, 404
-    return MessageToDict(bucket["metadata"])
+    return utils.ToRestDict(bucket["metadata"], "storage#bucket")
 
 
 @gcs.route("/b/<bucket_name>", methods=["PUT"])
 def buckets_update(bucket_name):
-    payload = utils.ToProtoDict(json.loads(flask.request.data))
+    insert_test_bucket()
+    payload = utils.ToProtoDict(flask.request.data)
     bucket = utils.LookupBucket(bucket_name)
     if bucket is None:
         return "Bucket %s does not exist" % bucket_name, 404
     bucket = bucket["metadata"]
     bucket.Clear()
     bucket = ParseDict(payload, bucket, ignore_unknown_fields=True)
-    return utils.ToRestDict(MessageToDict(bucket))
+    return utils.ToRestDict(bucket, "storage#bucket")
 
 
 @gcs.route("/b/<bucket_name>", methods=["PATCH"])
 def buckets_patch(bucket_name):
-    payload = utils.ToProtoDict(json.loads(flask.request.data))
+    payload = utils.ToProtoDict(flask.request.data)
     bucket = utils.LookupBucket(bucket_name)
     if bucket is None:
         return "Bucket %s does not exist" % bucket_name, 404
     bucket = bucket["metadata"]
     bucket = ParseDict(payload, bucket, ignore_unknown_fields=True)
-    return utils.ToRestDict(MessageToDict(bucket))
+    return utils.ToRestDict(bucket, "storage#bucket")
 
 
 @gcs.route("/b/<bucket_name>", methods=["DELETE"])

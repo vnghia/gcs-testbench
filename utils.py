@@ -1,6 +1,8 @@
+import json
 import re
 
 from flatdict import FlatterDict
+from google.protobuf.json_format import MessageToDict
 
 snake_case = re.compile(r"(?<!^)(?=[A-Z])")
 
@@ -55,6 +57,7 @@ def ToBuiltinDict(source):
 
 
 def ToProtoDict(payload):
+    payload = json.loads(payload)
     flat = ToSnakeCaseFlat(payload)
     created_before = flat.get("lifecycle:rule:0:condition:created_before")
     if created_before is not None:
@@ -63,8 +66,11 @@ def ToProtoDict(payload):
     return ToBuiltinDict(flat.as_dict())
 
 
-def ToRestDict(payload):
+def ToRestDict(payload, kind=None):
+    payload = MessageToDict(payload)
     flat = FlatterDict(payload)
+    if kind is not None:
+        flat["kind"] = kind
     created_before = flat.get("lifecycle:rule:0:condition:createdBefore")
     if created_before is not None:
         flat["lifecycle:rule:0:condition:createdBefore"] = created_before.replace(
