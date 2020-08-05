@@ -2,7 +2,7 @@ import json
 import re
 
 from flatdict import FlatterDict
-from google.protobuf.json_format import MessageToDict
+from google.protobuf.json_format import MessageToDict, ParseDict
 
 snake_case = re.compile(r"(?<!^)(?=[A-Z])")
 
@@ -79,15 +79,13 @@ def ToRestDict(payload, kind=None):
     return ToBuiltinDict(flat.as_dict())
 
 
-# def ToRestDict(source):
-#     destination = {}
-#     for key in source:
-#         if isinstance(source[key], dict):
-#             result = ToProtoDict(source[key])
-#             destination[ToCamelCase(key)] = result
-#         else:
-#             destination[ToCamelCase(key)] = source[key]
-#     return destination
+def FilterMessage(message, fields):
+    dump = MessageToDict(message, preserving_proto_field_name=True)
+    payload = dict()
+    for key in fields:
+        payload[ToSnakeCase(key)] = dump.get(ToSnakeCase(key))
+    message.Clear()
+    return ParseDict(payload, message, ignore_unknown_fields=True)
 
 
 GCS_BUCKETS = dict()
@@ -112,3 +110,28 @@ def LookupBucket(bucket_name):
 
 def DeleteBucket(bucket_name):
     del GCS_BUCKETS[bucket_name]
+
+
+def CheckBucketPrecondition(bucket_name, request):
+    bucket = LookupBucket(bucket_name)
+    if bucket is None:
+        return "Bucket %s does not exist" % bucket_name, 404
+    metageneration = str(bucket["metadata"].metageneration)
+    metageneration_match = request.args.get("ifMetagenerationMatch")
+    metageneration_not_match = request.args.get("ifMetagenerationNotMatch")
+    if (
+        metageneration_not_match is not None
+        and metageneration_not_match == metageneration
+    ):
+        return (
+            "Precondition Failed (metageneration = %s vs metageneration_not_match = %s)"
+            % (metageneration, metageneration_not_match),
+            412,
+        )
+    if metageneration_match is not None and metageneration_match != metageneration:
+        return (
+            "Precondition Failed (metageneration = %s vs metageneration_match = %s)"
+            % (metageneration, metageneration_match),
+            412,
+        )
+    return bucket, 200

@@ -1,6 +1,7 @@
 from concurrent import futures
 
 import argparse
+import json
 import logging
 import os
 
@@ -93,19 +94,27 @@ def buckets_insert():
 @gcs.route("/b/<bucket_name>")
 def buckets_get(bucket_name):
     insert_test_bucket()
-    bucket = utils.LookupBucket(bucket_name)
-    if bucket is None:
-        return "Bucket %s does not exist" % bucket_name, 404
-    return utils.ToRestDict(bucket["metadata"], "storage#bucket")
+    bucket, status_code = utils.CheckBucketPrecondition(bucket_name, flask.request)
+    if status_code != 200:
+        return bucket, status_code
+    fields = flask.request.args.getlist("fields")
+    result = resources.Bucket()
+    result.CopyFrom(bucket["metadata"])
+    kind = "storage#bucket"
+    if len(fields) != 0:
+        result = utils.FilterMessage(result, fields)
+        if "kind" not in fields:
+            kind = None
+    return utils.ToRestDict(result, kind)
 
 
 @gcs.route("/b/<bucket_name>", methods=["PUT"])
 def buckets_update(bucket_name):
     insert_test_bucket()
+    bucket, status_code = utils.CheckBucketPrecondition(bucket_name, flask.request)
+    if status_code != 200:
+        return bucket, status_code
     payload = utils.ToProtoDict(flask.request.data)
-    bucket = utils.LookupBucket(bucket_name)
-    if bucket is None:
-        return "Bucket %s does not exist" % bucket_name, 404
     bucket = bucket["metadata"]
     bucket.Clear()
     bucket = ParseDict(payload, bucket, ignore_unknown_fields=True)
@@ -115,9 +124,9 @@ def buckets_update(bucket_name):
 @gcs.route("/b/<bucket_name>", methods=["PATCH"])
 def buckets_patch(bucket_name):
     payload = utils.ToProtoDict(flask.request.data)
-    bucket = utils.LookupBucket(bucket_name)
-    if bucket is None:
-        return "Bucket %s does not exist" % bucket_name, 404
+    bucket, status_code = utils.CheckBucketPrecondition(bucket_name, flask.request)
+    if status_code != 200:
+        return bucket, status_code
     bucket = bucket["metadata"]
     bucket = ParseDict(payload, bucket, ignore_unknown_fields=True)
     return utils.ToRestDict(bucket, "storage#bucket")
@@ -125,9 +134,9 @@ def buckets_patch(bucket_name):
 
 @gcs.route("/b/<bucket_name>", methods=["DELETE"])
 def buckets_delete(bucket_name):
-    bucket = utils.LookupBucket(bucket_name)
-    if bucket is None:
-        return "Bucket %s does not exist" % bucket_name, 404
+    bucket, status_code = utils.CheckBucketPrecondition(bucket_name, flask.request)
+    if status_code != 200:
+        return bucket, status_code
     utils.DeleteBucket(bucket_name)
     return ""
 
