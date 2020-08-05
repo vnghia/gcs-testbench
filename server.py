@@ -16,7 +16,7 @@ import storage_pb2_grpc
 import storage_resources_pb2 as resources
 import storage_resources_pb2_grpc
 
-from google.protobuf.json_format import ParseDict
+from google.protobuf.json_format import ParseDict, MessageToDict
 
 # REST
 import flask
@@ -303,6 +303,54 @@ def bucket_default_object_acl_patch(bucket_name, entity):
                 bucket["metadata"].default_object_acl[i], "storage#objectAccessControl"
             )
     return "ACL does not exist", 404
+
+
+@gcs.route("/b/<bucket_name>/notificationConfigs")
+def bucket_notification_list(bucket_name):
+    raw_list, code = utils.ListNotification(bucket_name)
+    if code != 200:
+        return raw_list, code
+    result = {"items": []}
+    for noti in raw_list:
+        result["items"].append(utils.ToRestDict(noti, "storage#notification"))
+    return result
+
+
+@gcs.route("/b/<bucket_name>/notificationConfigs", methods=["POST"])
+def bucket_notification_create(bucket_name):
+    payload = utils.ToProtoDict(flask.request.data)
+    noti = ParseDict(payload, resources.Notification(), ignore_unknown_fields=True)
+    result, code = utils.InsertNotification(bucket_name, noti)
+    if code != 200:
+        return result, code
+    result = MessageToDict(result, preserving_proto_field_name=True)
+    result["kind"] = "storage#notification"
+    return result
+
+
+@gcs.route("/b/<bucket_name>/notificationConfigs/<notification_id>", methods=["DELETE"])
+def bucket_notification_delete(bucket_name, notification_id):
+    raw_list, code = utils.ListNotification(bucket_name)
+    if code != 200:
+        return raw_list, code
+    for i in range(len(raw_list)):
+        if raw_list[i].id == notification_id:
+            del raw_list[i]
+            return ""
+    return "Notification %s does not exist" % notification_id, 404
+
+
+@gcs.route("/b/<bucket_name>/notificationConfigs/<notification_id>")
+def bucket_notification_get(bucket_name, notification_id):
+    raw_list, code = utils.ListNotification(bucket_name)
+    if code != 200:
+        return raw_list, code
+    for noti in raw_list:
+        if noti.id == notification_id:
+            result = MessageToDict(noti, preserving_proto_field_name=True)
+            result["kind"] = "storage#notification"
+            return result
+    return "Notification %s does not exist" % notification_id, 404
 
 
 application = DispatcherMiddleware(root, {GCS_HANDLER_PATH: gcs})

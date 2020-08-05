@@ -112,7 +112,7 @@ def make_bucket(metadata):
     InsertObjectDefaultACL(metadata, "project-owners-123456789", "OWNER")
     InsertObjectDefaultACL(metadata, "project-editors-123456789", "OWNER")
     InsertObjectDefaultACL(metadata, "project-viewers-123456789", "READER")
-    return {"metadata": metadata}
+    return {"metadata": metadata, "notification": []}
 
 
 def InsertBucket(bucket):
@@ -159,3 +159,24 @@ def CheckBucketPrecondition(bucket_name, request):
 
 def UpdateBucketFromRequest(bucket, request):
     pass
+
+
+def InsertNotification(bucket_name, notification):
+    InsertNotification.counter += 1
+    bucket = LookupBucket(bucket_name)
+    if bucket is None:
+        return "Bucket %s does not exist" % bucket_name, 404
+    nofication_id = "notification-%s" % str(InsertNotification.counter)
+    notification.id = nofication_id
+    bucket["notification"].append(notification)
+    return notification, 200
+
+
+InsertNotification.counter = 0
+
+
+def ListNotification(bucket_name):
+    bucket = LookupBucket(bucket_name)
+    if bucket is None:
+        return "Bucket %s does not exist" % bucket_name, 404
+    return bucket["notification"], 200
