@@ -176,6 +176,22 @@ def bucket_acl_get(bucket_name, entity):
     return "ACL does not exist", 404
 
 
+@gcs.route("/b/<bucket_name>/acl/<entity>", methods=["PUT"])
+def bucket_acl_update(bucket_name, entity):
+    bucket, status_code = utils.CheckBucketPrecondition(bucket_name, flask.request)
+    if status_code != 200:
+        return bucket, status_code
+    for i in range(len(bucket["metadata"].acl)):
+        if bucket["metadata"].acl[i].entity == entity:
+            payload = utils.ToProtoDict(flask.request.data)
+            bucket["metadata"].acl[i].Clear()
+            ParseDict(payload, bucket["metadata"].acl[i], ignore_unknown_fields=True)
+            return utils.ToRestDict(
+                bucket["metadata"].acl[i], "storage#bucketAccessControl"
+            )
+    return "ACL does not exist", 404
+
+
 application = DispatcherMiddleware(root, {GCS_HANDLER_PATH: gcs})
 
 
