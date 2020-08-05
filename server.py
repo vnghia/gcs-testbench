@@ -85,6 +85,7 @@ def buckets_list():
 def buckets_insert():
     """Implement the 'Buckets: insert' API: create a new Bucket."""
     insert_test_bucket()
+    print(flask.request.args)
     payload = utils.ToProtoDict(flask.request.data)
     bucket = ParseDict(payload, resources.Bucket(), ignore_unknown_fields=True)
     utils.InsertBucket(bucket)

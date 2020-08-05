@@ -1,6 +1,8 @@
 import json
 import re
 
+import storage_resources_pb2 as resources
+
 from flatdict import FlatterDict
 from google.protobuf.json_format import MessageToDict, ParseDict
 
@@ -91,7 +93,19 @@ def FilterMessage(message, fields):
 GCS_BUCKETS = dict()
 
 
+def InsertBucketACL(bucket, entity, role):
+    bucket.acl.append(
+        resources.BucketAccessControl(bucket=bucket.name, role=role, entity=entity)
+    )
+
+
 def make_bucket(metadata):
+    InsertBucketACL(metadata, "project-owners-123456789", "OWNER")
+    InsertBucketACL(metadata, "project-editors-123456789", "OWNER")
+    InsertBucketACL(metadata, "project-viewers-123456789", "READER")
+    InsertBucketACL(metadata, "project-owners-123456789", "OWNER")
+    InsertBucketACL(metadata, "project-editors-123456789", "OWNER")
+    InsertBucketACL(metadata, "project-viewers-123456789", "READER")
     return {"metadata": metadata}
 
 
@@ -135,3 +149,7 @@ def CheckBucketPrecondition(bucket_name, request):
             412,
         )
     return bucket, 200
+
+
+def UpdateBucketFromRequest(bucket, request):
+    pass
