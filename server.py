@@ -359,7 +359,6 @@ def bucket_get_iam_policy(bucket_name):
     bucket, status_code = utils.CheckBucketPrecondition(bucket_name, flask.request)
     if status_code != 200:
         return bucket, status_code
-    print(flask.request.data)
     result, code = utils.GetBucketIamPolicy(bucket_name)
     if code != 200:
         return result, code
@@ -381,6 +380,15 @@ def bucket_test_iam_permissions(bucket_name):
     permissions = flask.request.args.getlist("permissions")
     result = {"kind": "storage#testIamPermissionsResponse", "permissions": permissions}
     return result
+
+
+@gcs.route("/b/<bucket_name>/lockRetentionPolicy", methods=["POST"])
+def bucket_lock_retention_policy(bucket_name):
+    bucket, status_code = utils.CheckBucketPrecondition(bucket_name, flask.request)
+    if status_code != 200:
+        return bucket, status_code
+    bucket["metadata"].retention_policy.is_locked = True
+    return utils.ToRestDict(bucket["metadata"], "storage#bucket")
 
 
 application = DispatcherMiddleware(root, {GCS_HANDLER_PATH: gcs})
