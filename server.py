@@ -85,7 +85,6 @@ def buckets_list():
 def buckets_insert():
     """Implement the 'Buckets: insert' API: create a new Bucket."""
     insert_test_bucket()
-    print(flask.request.args)
     payload = utils.ToProtoDict(flask.request.data)
     bucket = ParseDict(payload, resources.Bucket(), ignore_unknown_fields=True)
     utils.InsertBucket(bucket)
@@ -140,6 +139,19 @@ def buckets_delete(bucket_name):
         return bucket, status_code
     utils.DeleteBucket(bucket_name)
     return ""
+
+
+@gcs.route("/b/<bucket_name>/acl", methods=["POST"])
+def bucket_acl_create(bucket_name):
+    bucket, status_code = utils.CheckBucketPrecondition(bucket_name, flask.request)
+    if status_code != 200:
+        return bucket, status_code
+    payload = utils.ToProtoDict(flask.request.data)
+    acl = ParseDict(
+        payload, resources.BucketAccessControl(), ignore_unknown_fields=True
+    )
+    bucket["metadata"].acl.append(acl)
+    return utils.ToRestDict(acl, "storage#bucketAccessControl")
 
 
 application = DispatcherMiddleware(root, {GCS_HANDLER_PATH: gcs})
