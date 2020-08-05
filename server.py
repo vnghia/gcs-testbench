@@ -207,6 +207,18 @@ def bucket_acl_patch(bucket_name, entity):
     return "ACL does not exist", 404
 
 
+@gcs.route("/b/<bucket_name>/acl/<entity>", methods=["DELETE"])
+def bucket_acl_delete(bucket_name, entity):
+    bucket, status_code = utils.CheckBucketPrecondition(bucket_name, flask.request)
+    if status_code != 200:
+        return bucket, status_code
+    for i in range(len(bucket["metadata"].acl)):
+        if bucket["metadata"].acl[i].entity == entity:
+            del bucket["metadata"].acl[i]
+            return ""
+    return "ACL does not exist", 404
+
+
 application = DispatcherMiddleware(root, {GCS_HANDLER_PATH: gcs})
 
 
