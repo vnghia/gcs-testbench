@@ -141,6 +141,17 @@ def buckets_delete(bucket_name):
     return ""
 
 
+@gcs.route("/b/<bucket_name>/acl")
+def bucket_acl_list(bucket_name):
+    bucket, status_code = utils.CheckBucketPrecondition(bucket_name, flask.request)
+    if status_code != 200:
+        return bucket, status_code
+    result = {"items": []}
+    for item in bucket["metadata"].acl:
+        result["items"].append(utils.ToRestDict(item, "storage#bucketAccessControl"))
+    return result
+
+
 @gcs.route("/b/<bucket_name>/acl", methods=["POST"])
 def bucket_acl_create(bucket_name):
     bucket, status_code = utils.CheckBucketPrecondition(bucket_name, flask.request)
