@@ -2,6 +2,7 @@ from concurrent import futures
 
 import argparse
 import json
+import httpbin
 import logging
 import os
 
@@ -399,7 +400,9 @@ def bucket_lock_retention_policy(bucket_name):
     return utils.ToRestDict(bucket["metadata"], "storage#bucket")
 
 
-application = DispatcherMiddleware(root, {GCS_HANDLER_PATH: gcs})
+application = DispatcherMiddleware(
+    root, {"/httpbin": httpbin.app, GCS_HANDLER_PATH: gcs}
+)
 
 
 def rest_serve(port):
