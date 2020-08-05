@@ -1,9 +1,11 @@
+import base64
 import json
 import re
 
 import storage_resources_pb2 as resources
 
 from flatdict import FlatterDict
+from google.iam.v1 import policy_pb2
 from google.protobuf.json_format import MessageToDict, ParseDict
 
 snake_case = re.compile(r"(?<!^)(?=[A-Z])")
@@ -105,6 +107,40 @@ def InsertObjectDefaultACL(bucket, entity, role):
     )
 
 
+def InsertBucketIamPolicy(bucket, bindings):
+    role_mapping = {
+        "READER": "roles/storage.legacyBucketReader",
+        "WRITER": "roles/storage.legacyBucketWriter",
+        "OWNER": "roles/storage.legacyBucketOwner",
+    }
+    copy_of_bindings = bindings.copy()
+    for entry in bucket.acl:
+        legacy_role = entry.role
+        if legacy_role is None or entry.entity is None:
+            return "Invalid ACL entry", 500
+        role = role_mapping.get(legacy_role)
+        if role is None:
+            return "Invalid legacy role %s" % legacy_role, 500
+        found = False
+        members = [entry.entity]
+        for binding in copy_of_bindings:
+            if binding.role == role and not binding.condition:
+                found = True
+                for member in members:
+                    binding.members.append(member)
+                break
+        if not found:
+            copy_of_bindings.append(policy_pb2.Binding(role=role, members=members))
+    return (
+        policy_pb2.Policy(
+            version=1,
+            bindings=copy_of_bindings,
+            etag=base64.b64encode(bytearray("etag-0", "utf-8")),
+        ),
+        200,
+    )
+
+
 def make_bucket(metadata):
     InsertBucketACL(metadata, "project-owners-123456789", "OWNER")
     InsertBucketACL(metadata, "project-editors-123456789", "OWNER")
@@ -112,7 +148,7 @@ def make_bucket(metadata):
     InsertObjectDefaultACL(metadata, "project-owners-123456789", "OWNER")
     InsertObjectDefaultACL(metadata, "project-editors-123456789", "OWNER")
     InsertObjectDefaultACL(metadata, "project-viewers-123456789", "READER")
-    return {"metadata": metadata, "notification": []}
+    return {"metadata": metadata, "notification": [], "iam_policy": None}
 
 
 def InsertBucket(bucket):
@@ -180,3 +216,33 @@ def ListNotification(bucket_name):
     if bucket is None:
         return "Bucket %s does not exist" % bucket_name, 404
     return bucket["notification"], 200
+
+
+def GetBucketIamPolicy(bucket_name):
+    bucket = LookupBucket(bucket_name)
+    if bucket is None:
+        return "Bucket %s does not exist" % bucket_name, 404
+    if bucket["iam_policy"] is None:
+        result, code = InsertBucketIamPolicy(bucket["metadata"], [])
+        if code != 200:
+            return result, code
+        bucket["iam_policy"] = result
+    return bucket["iam_policy"], 200
+
+
+def SetBucketIamPolicy(bucket_name, policy):
+    SetBucketIamPolicy.counter += 1
+    bucket = LookupBucket(bucket_name)
+    if bucket is None:
+        return "Bucket %s does not exist" % bucket_name, 404
+    if bucket["iam_policy"] is None:
+        bucket["iam_policy"] = policy
+    else:
+        bucket["iam_policy"].CopyFrom(policy)
+    bucket["iam_policy"].etag = base64.b64encode(
+        bytearray("etag-%d" % SetBucketIamPolicy.counter, "utf-8")
+    )
+    return bucket["iam_policy"], 200
+
+
+SetBucketIamPolicy.counter = 0

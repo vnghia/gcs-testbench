@@ -16,6 +16,7 @@ import storage_pb2_grpc
 import storage_resources_pb2 as resources
 import storage_resources_pb2_grpc
 
+from google.iam.v1 import policy_pb2
 from google.protobuf.json_format import ParseDict, MessageToDict
 
 # REST
@@ -351,6 +352,35 @@ def bucket_notification_get(bucket_name, notification_id):
             result["kind"] = "storage#notification"
             return result
     return "Notification %s does not exist" % notification_id, 404
+
+
+@gcs.route("/b/<bucket_name>/iam")
+def bucket_get_iam_policy(bucket_name):
+    bucket, status_code = utils.CheckBucketPrecondition(bucket_name, flask.request)
+    if status_code != 200:
+        return bucket, status_code
+    print(flask.request.data)
+    result, code = utils.GetBucketIamPolicy(bucket_name)
+    if code != 200:
+        return result, code
+    return utils.ToRestDict(result, "storage#policy")
+
+
+@gcs.route("/b/<bucket_name>/iam", methods=["PUT"])
+def bucket_set_iam_policy(bucket_name):
+    payload = utils.ToProtoDict(flask.request.data)
+    policy = ParseDict(payload, policy_pb2.Policy(), ignore_unknown_fields=True)
+    result, code = utils.SetBucketIamPolicy(bucket_name, policy)
+    if code != 200:
+        return result, code
+    return utils.ToRestDict(result, "storage#policy")
+
+
+@gcs.route("/b/<bucket_name>/iam/testPermissions")
+def bucket_test_iam_permissions(bucket_name):
+    permissions = flask.request.args.getlist("permissions")
+    result = {"kind": "storage#testIamPermissionsResponse", "permissions": permissions}
+    return result
 
 
 application = DispatcherMiddleware(root, {GCS_HANDLER_PATH: gcs})
