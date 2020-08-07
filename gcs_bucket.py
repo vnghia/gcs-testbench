@@ -90,17 +90,18 @@ class Bucket:
         return valid
 
     def to_rest(self, request=None, projection=None):
-        projection = request.args.get("projection", projection)
-        fields = request.args.getlist("fields")
         result = utils.ToRestDict(self.metadata, "storage#bucket")
-        if len(fields) != 0:
-            deletes = [key for key in result if key not in fields]
-            for field in deletes:
-                del result[field]
-        if projection is None or projection == "noAcl":
-            result.pop("acl", None)
-            result.pop("defaultObjectAcl", None)
-            result.pop("owner", None)
+        if request is not None:
+            projection = request.args.get("projection", projection)
+            fields = request.args.getlist("fields")
+            if len(fields) != 0:
+                deletes = [key for key in result if key not in fields]
+                for field in deletes:
+                    del result[field]
+            if projection is None or projection == "noAcl":
+                result.pop("acl", None)
+                result.pop("defaultObjectAcl", None)
+                result.pop("owner", None)
         return result
 
     def update(self, request, clear=True):

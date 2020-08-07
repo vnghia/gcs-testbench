@@ -9,6 +9,7 @@ import os
 # common
 import utils
 import gcs_bucket
+import gcs_object
 
 # gRPC
 import grpc
@@ -272,8 +273,77 @@ def bucket_lock_retention_policy(bucket_name):
     return bucket.to_rest(flask.request)
 
 
+@gcs.route("/b/<bucket_name>/o")
+def objects_list(bucket_name):
+    insert_test_bucket()
+    objs, prefixes = gcs_object.Object.list(bucket_name)
+    result = {"items": [], "prefixes": prefixes, "nextPageToken": ""}
+    versions = flask.request.args.get("versions", False)
+    for obj in objs:
+        result["items"].append(obj.to_rest(flask.request, None))
+        if versions:
+            result["items"].extend(obj.old_metadatas_to_rest(flask.request, None))
+    return result
+
+
+@gcs.route("/b/<bucket_name>/o/<path:object_name>", methods=["PUT"])
+def objects_update(bucket_name, object_name):
+    obj = gcs_object.Object.lookup(bucket_name, object_name, flask.request)
+    projection = obj.update(flask.request)
+    return obj.to_rest(flask.request, projection=projection)
+
+
+@gcs.route("/b/<bucket_name>/o/<path:object_name>", methods=["PATCH"])
+def objects_patch(bucket_name, object_name):
+    obj = gcs_object.Object.lookup(bucket_name, object_name, flask.request)
+    projection = obj.update(flask.request)
+    return obj.to_rest(flask.request, projection=projection)
+
+
+@gcs.route("/b/<bucket_name>/o/<path:object_name>", methods=["DELETE"])
+def objects_delete(bucket_name, object_name):
+    obj = gcs_object.Object.lookup(bucket_name, object_name, flask.request)
+    obj.delete()
+    return ""
+
+
+# Define the WSGI application to handle bucket requests.
+UPLOAD_HANDLER_PATH = "/upload/storage/v1"
+upload = flask.Flask(__name__)
+upload.debug = True
+
+
+@upload.route("/b/<bucket_name>/o", methods=["POST"])
+def objects_insert(bucket_name):
+    obj = gcs_object.Object(bucket_name, request=flask.request)
+    return obj.to_rest(flask.request)
+
+
+# Define the WSGI application to handle bucket requests.
+DOWNLOAD_HANDLER_PATH = "/download/storage/v1"
+download = flask.Flask(__name__)
+download.debug = True
+
+
+@gcs.route("/b/<bucket_name>/o/<path:object_name>")
+@download.route("/b/<bucket_name>/o/<path:object_name>")
+def objects_get(bucket_name, object_name):
+    obj = gcs_object.Object.lookup(bucket_name, object_name, flask.request)
+    alt = flask.request.args.get("alt", "json")
+    if alt == "json":
+        return obj.get_generation(flask.request)
+    else:
+        return obj.content
+
+
 application = DispatcherMiddleware(
-    root, {"/httpbin": httpbin.app, GCS_HANDLER_PATH: gcs}
+    root,
+    {
+        "/httpbin": httpbin.app,
+        GCS_HANDLER_PATH: gcs,
+        UPLOAD_HANDLER_PATH: upload,
+        DOWNLOAD_HANDLER_PATH: download,
+    },
 )
 
 

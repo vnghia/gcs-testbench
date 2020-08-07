@@ -48,6 +48,9 @@ def ToProtoDict(payload):
         flat["lifecycle:rule:0:condition:created_before"] = created_before
     flat.pop("iam_configuration:bucket_policy_only:enabled", None)
     flat.pop("kind", None)
+    for k, v in flat.items():
+        if v is None:
+            del flat[k]
     return ToBuiltinDict(flat.as_dict())
 
 
@@ -61,14 +64,21 @@ def ToRestDict(payload, kind=None):
         flat["lifecycle:rule:0:condition:createdBefore"] = created_before.replace(
             "T00:00:00Z", ""
         )
+    crc32c = flat.get("crc32c")
+    if crc32c is not None:
+        flat["crc32c"] = str(crc32c)
     return ToBuiltinDict(flat.as_dict())
 
 
 GCS_BUCKETS = dict()
+GCS_OBJECTS = dict()
+GCS_UPLOADS = dict()
 
 
 def insert_bucket(bucket):
     GCS_BUCKETS[bucket.metadata.name] = bucket
+    GCS_OBJECTS[bucket.metadata.name] = dict()
+    GCS_UPLOADS[bucket.metadata.name] = dict()
 
 
 def lookup_bucket(bucket_name):
@@ -89,3 +99,19 @@ def compute_etag(content):
 
 def abort(code, message):
     flask.abort(flask.make_response(flask.jsonify(message), code))
+
+
+def insert_object(obj):
+    if GCS_OBJECTS.get(obj.metadata.bucket) is None:
+        abort(404, "Bucket %s does not exist" % obj.metadata.bucket)
+    GCS_OBJECTS[obj.metadata.bucket][obj.metadata.name] = obj
+
+
+def all_objects(bucket_name):
+    if GCS_OBJECTS.get(bucket_name) is None:
+        abort(404, "Bucket %s does not exist" % bucket_name)
+    return GCS_OBJECTS[bucket_name]
+
+
+def delete_object(bucket_name, object_name):
+    del GCS_OBJECTS[bucket_name][object_name]
