@@ -15,7 +15,6 @@ _sym_db = _symbol_database.Default()
 from google.protobuf import timestamp_pb2 as google_dot_protobuf_dot_timestamp__pb2
 from google.protobuf import wrappers_pb2 as google_dot_protobuf_dot_wrappers__pb2
 
-
 DESCRIPTOR = _descriptor.FileDescriptor(
     name="google/cloud/storage_v1/proto/storage_resources.proto",
     package="google.storage.v1",

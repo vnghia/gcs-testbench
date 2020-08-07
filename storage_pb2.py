@@ -12,15 +12,15 @@ from google.protobuf import symbol_database as _symbol_database
 _sym_db = _symbol_database.Default()
 
 
+from google.api import client_pb2 as google_dot_api_dot_client__pb2
 from google.api import field_behavior_pb2 as google_dot_api_dot_field__behavior__pb2
 from google.iam.v1 import iam_policy_pb2 as google_dot_iam_dot_v1_dot_iam__policy__pb2
 from google.iam.v1 import policy_pb2 as google_dot_iam_dot_v1_dot_policy__pb2
 from google.protobuf import empty_pb2 as google_dot_protobuf_dot_empty__pb2
 from google.protobuf import field_mask_pb2 as google_dot_protobuf_dot_field__mask__pb2
 from google.protobuf import wrappers_pb2 as google_dot_protobuf_dot_wrappers__pb2
-import storage_resources_pb2 as google_dot_cloud_dot_storage__v1_dot_proto_dot_storage__resources__pb2
-from google.api import client_pb2 as google_dot_api_dot_client__pb2
 
+import storage_resources_pb2 as google_dot_cloud_dot_storage__v1_dot_proto_dot_storage__resources__pb2
 
 DESCRIPTOR = _descriptor.FileDescriptor(
     name="google/cloud/storage_v1/proto/storage.proto",
