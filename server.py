@@ -1,33 +1,34 @@
-from concurrent import futures
-
 import argparse
 import json
-import httpbin
 import logging
 import os
+from concurrent import futures
 
-# common
-import utils
-import gcs_bucket
-import gcs_object
-
-# gRPC
+import flask
 import grpc
+import httpbin
+from google.iam.v1 import policy_pb2
+from google.protobuf.json_format import MessageToDict, ParseDict
+from werkzeug import serving
+from werkzeug.middleware.dispatcher import DispatcherMiddleware
 
+import gcs_bucket
 import storage_pb2 as storage
 import storage_pb2_grpc
 import storage_resources_pb2 as resources
 import storage_resources_pb2_grpc
+import utils
 
-from google.iam.v1 import policy_pb2
-from google.protobuf.json_format import ParseDict, MessageToDict
+# Constant
 
-# REST
-import flask
-from werkzeug import serving
-from werkzeug.middleware.dispatcher import DispatcherMiddleware
+KIND_BUCKET_ACL = "storage#bucketAccessControl"
+KIND_OBJECT_ACL = "storage#objectAccessControl"
+KIND_POLICY = "storage#policy"
+KIND_NOTIFICATION = "storage#notification"
 
-# gRPC
+# GPRC
+
+
 grpc_server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
 
 
@@ -43,6 +44,8 @@ def grpc_serve(port):
 
 
 # REST
+
+
 root = flask.Flask(__name__)
 root.debug = True
 
@@ -64,203 +67,213 @@ def insert_test_bucket():
         bucket_name = os.environ.get(
             "GOOGLE_CLOUD_CPP_STORAGE_TEST_BUCKET_NAME", "test-bucket"
         )
-        # Enable versioning in the Bucket, the integration tests expect
-        # this to be the case, this brings the metageneration number to 4.
-        gcs_bucket.Bucket(
-            bucket_name, addition={"versioning": {"enabled": True}, "metageneration": 4}
-        )
+        bucket_test = gcs_bucket.Bucket(json.dumps({"name": bucket_name}))
+        bucket_test.metadata.metageneration = 4
+        bucket_test.metadata.versioning.enabled = True
 
 
 @gcs.route("/b", methods=["GET"])
 def buckets_list():
     insert_test_bucket()
     project = flask.request.args.get("project")
-    result = {"next_page_token": "", "items": []}
+    result = resources.ListBucketsResponse(next_page_token="", items=[])
     for name, b in gcs_bucket.Bucket.list(project):
-        result["items"].append(b.to_rest(flask.request))
-    return result
+        result.items.append(b.metadata)
+    return utils.message_to_rest(
+        result,
+        "storage#buckets",
+        flask.request.args.get("fields", None),
+        len(result.items),
+    )
 
 
 @gcs.route("/b", methods=["POST"])
 def buckets_insert():
     insert_test_bucket()
-    bucket = gcs_bucket.Bucket(request=flask.request)
+    bucket = gcs_bucket.Bucket(flask.request.data)
     return bucket.to_rest(flask.request)
 
 
 @gcs.route("/b/<bucket_name>")
 def buckets_get(bucket_name):
     insert_test_bucket()
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
+    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request.args)
     return bucket.to_rest(flask.request)
 
 
 @gcs.route("/b/<bucket_name>", methods=["PUT"])
 def buckets_update(bucket_name):
     insert_test_bucket()
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
-    projection = bucket.update(flask.request)
-    return bucket.to_rest(flask.request, projection)
+    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request.args)
+    bucket.update(flask.request.data)
+    return bucket.to_rest(flask.request)
 
 
 @gcs.route("/b/<bucket_name>", methods=["PATCH"])
 def buckets_patch(bucket_name):
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
-    projection = bucket.update(flask.request, False)
-    return bucket.to_rest(flask.request, projection)
+    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request.args)
+    bucket.update(flask.request.data)
+    return bucket.to_rest(flask.request)
 
 
 @gcs.route("/b/<bucket_name>", methods=["DELETE"])
 def buckets_delete(bucket_name):
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
+    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request.args)
     bucket.delete()
     return ""
 
 
 @gcs.route("/b/<bucket_name>/acl")
 def bucket_acl_list(bucket_name):
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
-    result = {"items": []}
-    for acl in bucket.metadata.acl:
-        result["items"].append(gcs_bucket.Bucket.acl_to_rest(acl))
-    return result
+    bucket = gcs_bucket.Bucket.lookup(bucket_name)
+    result = resources.ListBucketAccessControlsResponse(items=bucket.metadata.acl)
+    return utils.message_to_rest(
+        result, KIND_BUCKET_ACL + "s", list_size=len(result.items)
+    )
 
 
 @gcs.route("/b/<bucket_name>/acl", methods=["POST"])
 def bucket_acl_create(bucket_name):
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
-    payload = json.loads(flask.request.data)
-    entity = payload["entity"]
-    role = payload["role"]
-    acl = bucket.insert_acl(entity, role)
-    return gcs_bucket.Bucket.acl_to_rest(acl)
+    bucket = gcs_bucket.Bucket.lookup(bucket_name)
+    acl = bucket.insert_acl(flask.request.data)
+    return utils.message_to_rest(acl, KIND_BUCKET_ACL)
 
 
 @gcs.route("/b/<bucket_name>/acl/<entity>")
 def bucket_acl_get(bucket_name, entity):
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
-    acl = bucket.lookup_acl(entity)
-    return gcs_bucket.Bucket.acl_to_rest(acl)
+    bucket = gcs_bucket.Bucket.lookup(bucket_name)
+    acl, _ = bucket.lookup_acl(entity)
+    return utils.message_to_rest(acl, KIND_BUCKET_ACL)
 
 
 @gcs.route("/b/<bucket_name>/acl/<entity>", methods=["PUT"])
 def bucket_acl_update(bucket_name, entity):
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
+    bucket = gcs_bucket.Bucket.lookup(bucket_name)
     role = json.loads(flask.request.data)["role"]
-    acl = bucket.insert_acl(entity, role, update=True, clear=True)
-    return gcs_bucket.Bucket.acl_to_rest(acl)
+    data = resources.BucketAccessControl(entity=entity, role=role)
+    acl = bucket.insert_acl(data, update=True)
+    return utils.message_to_rest(acl, KIND_BUCKET_ACL)
 
 
 @gcs.route("/b/<bucket_name>/acl/<entity>", methods=["PATCH"])
 def bucket_acl_patch(bucket_name, entity):
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
+    bucket = gcs_bucket.Bucket.lookup(bucket_name)
     role = json.loads(flask.request.data)["role"]
-    acl = bucket.insert_acl(entity, role, update=True, clear=False)
-    return gcs_bucket.Bucket.acl_to_rest(acl)
+    data = resources.BucketAccessControl(entity=entity, role=role)
+    acl = bucket.insert_acl(data, update=True)
+    return utils.message_to_rest(acl, KIND_BUCKET_ACL)
 
 
 @gcs.route("/b/<bucket_name>/acl/<entity>", methods=["DELETE"])
 def bucket_acl_delete(bucket_name, entity):
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
+    bucket = gcs_bucket.Bucket.lookup(bucket_name)
     bucket.delete_acl(entity)
     return ""
 
 
 @gcs.route("/b/<bucket_name>/defaultObjectAcl")
 def bucket_default_object_acl_list(bucket_name):
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
-    result = {"items": []}
-    for acl in bucket.metadata.default_object_acl:
-        result["items"].append(gcs_bucket.Bucket.acl_to_rest(acl, True))
-    return result
+    bucket = gcs_bucket.Bucket.lookup(bucket_name)
+    result = resources.ListObjectAccessControlsResponse(
+        items=bucket.metadata.default_object_acl
+    )
+    return utils.message_to_rest(
+        result, KIND_OBJECT_ACL + "s", list_size=len(result.items)
+    )
 
 
 @gcs.route("/b/<bucket_name>/defaultObjectAcl", methods=["POST"])
 def bucket_default_object_acl_create(bucket_name):
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
-    payload = json.loads(flask.request.data)
-    entity = payload["entity"]
-    role = payload["role"]
-    acl = bucket.insert_default_object_acl(entity, role)
-    return gcs_bucket.Bucket.acl_to_rest(acl, True)
+    bucket = gcs_bucket.Bucket.lookup(bucket_name)
+    acl = bucket.insert_default_object_acl(flask.request.data)
+    return utils.message_to_rest(acl, KIND_OBJECT_ACL)
 
 
 @gcs.route("/b/<bucket_name>/defaultObjectAcl/<entity>", methods=["DELETE"])
 def bucket_default_object_acl_delete(bucket_name, entity):
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
+    bucket = gcs_bucket.Bucket.lookup(bucket_name)
     bucket.delete_default_object_acl(entity)
     return ""
 
 
 @gcs.route("/b/<bucket_name>/defaultObjectAcl/<entity>")
 def bucket_default_object_acl_get(bucket_name, entity):
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
-    acl = bucket.lookup_default_object_acl(entity)
-    return gcs_bucket.Bucket.acl_to_rest(acl, True)
+    bucket = gcs_bucket.Bucket.lookup(bucket_name)
+    acl, _ = bucket.lookup_default_object_acl(entity)
+    return utils.message_to_rest(acl, KIND_OBJECT_ACL)
 
 
 @gcs.route("/b/<bucket_name>/defaultObjectAcl/<entity>", methods=["PUT"])
 def bucket_default_object_acl_update(bucket_name, entity):
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
+    bucket = gcs_bucket.Bucket.lookup(bucket_name)
     role = json.loads(flask.request.data)["role"]
-    acl = bucket.insert_default_object_acl(entity, role, update=True, clear=True)
-    return gcs_bucket.Bucket.acl_to_rest(acl, True)
+    data = resources.ObjectAccessControl(entity=entity, role=role)
+    acl = bucket.insert_default_object_acl(data, update=True)
+    return utils.message_to_rest(acl, KIND_OBJECT_ACL)
 
 
 @gcs.route("/b/<bucket_name>/defaultObjectAcl/<entity>", methods=["PATCH"])
 def bucket_default_object_acl_patch(bucket_name, entity):
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
+    bucket = gcs_bucket.Bucket.lookup(bucket_name)
     role = json.loads(flask.request.data)["role"]
-    acl = bucket.insert_default_object_acl(entity, role, update=True, clear=False)
-    return gcs_bucket.Bucket.acl_to_rest(acl, True)
+    data = resources.ObjectAccessControl(entity=entity, role=role)
+    acl = bucket.insert_default_object_acl(data, update=True)
+    return utils.message_to_rest(acl, KIND_OBJECT_ACL)
 
 
 @gcs.route("/b/<bucket_name>/notificationConfigs")
 def bucket_notification_list(bucket_name):
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
-    result = {"items": []}
-    for notification in bucket.notification:
-        result["items"].append(gcs_bucket.Bucket.noti_to_rest(notification))
-    return result
+    bucket = gcs_bucket.Bucket.lookup(bucket_name)
+    result = resources.ListNotificationsResponse(items=bucket.notification)
+    return utils.message_to_rest(
+        result,
+        KIND_NOTIFICATION + "s",
+        list_size=len(result.items),
+        preserving_proto_field_name=True,
+    )
 
 
 @gcs.route("/b/<bucket_name>/notificationConfigs", methods=["POST"])
 def bucket_notification_create(bucket_name):
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
-    notification = bucket.insert_noti(flask.request)
-    return gcs_bucket.Bucket.noti_to_rest(notification)
+    bucket = gcs_bucket.Bucket.lookup(bucket_name)
+    notification = bucket.insert_notification(flask.request.data)
+    return utils.message_to_rest(
+        notification, KIND_NOTIFICATION, preserving_proto_field_name=True,
+    )
 
 
 @gcs.route("/b/<bucket_name>/notificationConfigs/<notification_id>", methods=["DELETE"])
 def bucket_notification_delete(bucket_name, notification_id):
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
-    bucket.delete_noti(notification_id)
+    bucket = gcs_bucket.Bucket.lookup(bucket_name)
+    bucket.delete_notification(notification_id)
     return ""
 
 
 @gcs.route("/b/<bucket_name>/notificationConfigs/<notification_id>")
 def bucket_notification_get(bucket_name, notification_id):
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
-    notification = bucket.lookup_noti(notification_id)
-    return gcs_bucket.Bucket.noti_to_rest(notification)
+    bucket = gcs_bucket.Bucket.lookup(bucket_name)
+    notification, _ = bucket.lookup_notification(notification_id)
+    return utils.message_to_rest(
+        notification, KIND_NOTIFICATION, preserving_proto_field_name=True,
+    )
 
 
 @gcs.route("/b/<bucket_name>/iam")
 def bucket_get_iam_policy(bucket_name):
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
-    return gcs_bucket.Bucket.policy_to_rest(bucket.iam_policy)
+    bucket = gcs_bucket.Bucket.lookup(bucket_name)
+    return utils.message_to_rest(bucket.iam_policy, KIND_POLICY)
 
 
 @gcs.route("/b/<bucket_name>/iam", methods=["PUT"])
 def bucket_set_iam_policy(bucket_name):
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
-    bucket.insert_iam_policy(flask.request)
-    return gcs_bucket.Bucket.policy_to_rest(bucket.iam_policy)
+    bucket = gcs_bucket.Bucket.lookup(bucket_name)
+    bucket.insert_iam_policy(flask.request.data)
+    return utils.message_to_rest(bucket.iam_policy, KIND_POLICY)
 
 
 @gcs.route("/b/<bucket_name>/iam/testPermissions")
 def bucket_test_iam_permissions(bucket_name):
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
+    bucket = gcs_bucket.Bucket.lookup(bucket_name)
     permissions = flask.request.args.getlist("permissions")
     result = {"kind": "storage#testIamPermissionsResponse", "permissions": permissions}
     return result
@@ -268,7 +281,7 @@ def bucket_test_iam_permissions(bucket_name):
 
 @gcs.route("/b/<bucket_name>/lockRetentionPolicy", methods=["POST"])
 def bucket_lock_retention_policy(bucket_name):
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
+    bucket = gcs_bucket.Bucket.lookup(bucket_name)
     bucket.metadata.retention_policy.is_locked = True
     return bucket.to_rest(flask.request)
 
