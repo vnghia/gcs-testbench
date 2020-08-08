@@ -3,6 +3,7 @@ import random
 import re
 
 from google.iam.v1 import policy_pb2
+from google.protobuf.message import Message
 from google.protobuf.json_format import MessageToDict, ParseDict
 
 import storage_resources_pb2 as resources
@@ -53,32 +54,42 @@ class Bucket:
         return valid
 
     @classmethod
-    def lookup(cls, bucket_name, request=None):
+    def lookup(cls, bucket_name, args=None):
         bucket = utils.lookup_bucket(bucket_name)
         if bucket is None:
             utils.abort(404, "Bucket %s does not exist" % bucket_name)
-        if request is not None:
-            metageneration = str(bucket.metadata.metageneration)
-            metageneration_match = request.args.get("ifMetagenerationMatch")
-            metageneration_not_match = request.args.get("ifMetagenerationNotMatch")
-            if (
-                metageneration_not_match is not None
-                and metageneration_not_match == metageneration
-            ):
-                utils.abort(
-                    412,
-                    "Precondition Failed (metageneration = %s vs metageneration_not_match = %s)"
-                    % (metageneration, metageneration_not_match),
-                )
-            if (
-                metageneration_match is not None
-                and metageneration_match != metageneration
-            ):
-                utils.abort(
-                    412,
-                    "Precondition Failed (metageneration = %s vs metageneration_match = %s)"
-                    % (metageneration, metageneration_match),
-                )
+        metageneration = str(bucket.metadata.metageneration)
+        metageneration_match = None
+        metageneration_not_match = None
+        if isinstance(args, Message):
+            metageneration_match = (
+                str(args.if_metageneration_match.value)
+                if args.HasField("if_metageneration_match")
+                else None
+            )
+            metageneration_not_match = (
+                str(args.if_metageneration_not_match.value)
+                if args.HasField("if_metageneration_not_match")
+                else None
+            )
+        elif args is not None:
+            metageneration_match = args.get("ifMetagenerationMatch", None)
+            metageneration_not_match = args.get("ifMetagenerationNotMatch", None)
+        if (
+            metageneration_not_match is not None
+            and metageneration_not_match == metageneration
+        ):
+            utils.abort(
+                412,
+                "Precondition Failed (metageneration = %s vs metageneration_not_match = %s)"
+                % (metageneration, metageneration_not_match),
+            )
+        if metageneration_match is not None and metageneration_match != metageneration:
+            utils.abort(
+                412,
+                "Precondition Failed (metageneration = %s vs metageneration_match = %s)"
+                % (metageneration, metageneration_match),
+            )
         return bucket
 
     def __init_acl(self):
@@ -104,6 +115,25 @@ class Bucket:
             make_object_acl_proto("project-viewers-123456789", "READER")
         )
 
+    def __init_iam_policy(self):
+        role_mapping = {
+            "READER": "roles/storage.legacyBucketReader",
+            "WRITER": "roles/storage.legacyBucketWriter",
+            "OWNER": "roles/storage.legacyBucketOwner",
+        }
+        bindings = []
+        for entry in self.metadata.acl:
+            legacy_role = entry.role
+            if legacy_role is None or entry.entity is None:
+                utils.abort(500, "Invalid ACL entry")
+            role = role_mapping.get(legacy_role)
+            if role is None:
+                utils.abort(500, "Invalid legacy role %s" % legacy_role)
+            bindings.append(policy_pb2.Binding(role=role, members=[entry.entity]))
+        self.iam_policy = policy_pb2.Policy(
+            version=1, bindings=bindings, etag=utils.compute_etag("__init_iam_policy"),
+        )
+
     def to_rest(self, request):
         projection = "noAcl"
         if b"acl" in request.data or b"defaultObjectAcl" in request.data:
@@ -124,29 +154,11 @@ class Bucket:
             self.metadata.MergeFrom(data)
         else:
             self.metadata = ParseDict(utils.process_data(data), self.metadata)
-        self.metadata.metageneration = metageneration + 1
+        if self.metadata.versioning.enabled:
+            self.metadata.metageneration = metageneration + 1
 
     def delete(self):
         utils.delete_bucket(self.metadata.name)
-
-    def __init_iam_policy(self):
-        role_mapping = {
-            "READER": "roles/storage.legacyBucketReader",
-            "WRITER": "roles/storage.legacyBucketWriter",
-            "OWNER": "roles/storage.legacyBucketOwner",
-        }
-        bindings = []
-        for entry in self.metadata.acl:
-            legacy_role = entry.role
-            if legacy_role is None or entry.entity is None:
-                utils.abort(500, "Invalid ACL entry")
-            role = role_mapping.get(legacy_role)
-            if role is None:
-                utils.abort(500, "Invalid legacy role %s" % legacy_role)
-            bindings.append(policy_pb2.Binding(role=role, members=[entry.entity]))
-        self.iam_policy = policy_pb2.Policy(
-            version=1, bindings=bindings, etag=utils.compute_etag("__init_iam_policy"),
-        )
 
     def insert_acl(self, data, update=False):
         acl = (

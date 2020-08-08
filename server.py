@@ -97,35 +97,35 @@ def buckets_insert():
 @gcs.route("/b/<bucket_name>")
 def buckets_get(bucket_name):
     insert_test_bucket()
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
+    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request.args)
     return bucket.to_rest(flask.request)
 
 
 @gcs.route("/b/<bucket_name>", methods=["PUT"])
 def buckets_update(bucket_name):
     insert_test_bucket()
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
+    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request.args)
     bucket.update(flask.request.data)
     return bucket.to_rest(flask.request)
 
 
 @gcs.route("/b/<bucket_name>", methods=["PATCH"])
 def buckets_patch(bucket_name):
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
+    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request.args)
     bucket.update(flask.request.data)
     return bucket.to_rest(flask.request)
 
 
 @gcs.route("/b/<bucket_name>", methods=["DELETE"])
 def buckets_delete(bucket_name):
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
+    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request.args)
     bucket.delete()
     return ""
 
 
 @gcs.route("/b/<bucket_name>/acl")
 def bucket_acl_list(bucket_name):
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
+    bucket = gcs_bucket.Bucket.lookup(bucket_name)
     result = resources.ListBucketAccessControlsResponse(items=bucket.metadata.acl)
     return utils.message_to_rest(
         result, KIND_BUCKET_ACL + "s", list_size=len(result.items)
@@ -134,21 +134,21 @@ def bucket_acl_list(bucket_name):
 
 @gcs.route("/b/<bucket_name>/acl", methods=["POST"])
 def bucket_acl_create(bucket_name):
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
+    bucket = gcs_bucket.Bucket.lookup(bucket_name)
     acl = bucket.insert_acl(flask.request.data)
     return utils.message_to_rest(acl, KIND_BUCKET_ACL)
 
 
 @gcs.route("/b/<bucket_name>/acl/<entity>")
 def bucket_acl_get(bucket_name, entity):
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
+    bucket = gcs_bucket.Bucket.lookup(bucket_name)
     acl, _ = bucket.lookup_acl(entity)
     return utils.message_to_rest(acl, KIND_BUCKET_ACL)
 
 
 @gcs.route("/b/<bucket_name>/acl/<entity>", methods=["PUT"])
 def bucket_acl_update(bucket_name, entity):
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
+    bucket = gcs_bucket.Bucket.lookup(bucket_name)
     role = json.loads(flask.request.data)["role"]
     data = resources.BucketAccessControl(entity=entity, role=role)
     acl = bucket.insert_acl(data, update=True)
@@ -157,7 +157,7 @@ def bucket_acl_update(bucket_name, entity):
 
 @gcs.route("/b/<bucket_name>/acl/<entity>", methods=["PATCH"])
 def bucket_acl_patch(bucket_name, entity):
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
+    bucket = gcs_bucket.Bucket.lookup(bucket_name)
     role = json.loads(flask.request.data)["role"]
     data = resources.BucketAccessControl(entity=entity, role=role)
     acl = bucket.insert_acl(data, update=True)
@@ -166,14 +166,14 @@ def bucket_acl_patch(bucket_name, entity):
 
 @gcs.route("/b/<bucket_name>/acl/<entity>", methods=["DELETE"])
 def bucket_acl_delete(bucket_name, entity):
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
+    bucket = gcs_bucket.Bucket.lookup(bucket_name)
     bucket.delete_acl(entity)
     return ""
 
 
 @gcs.route("/b/<bucket_name>/defaultObjectAcl")
 def bucket_default_object_acl_list(bucket_name):
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
+    bucket = gcs_bucket.Bucket.lookup(bucket_name)
     result = resources.ListObjectAccessControlsResponse(
         items=bucket.metadata.default_object_acl
     )
@@ -184,28 +184,28 @@ def bucket_default_object_acl_list(bucket_name):
 
 @gcs.route("/b/<bucket_name>/defaultObjectAcl", methods=["POST"])
 def bucket_default_object_acl_create(bucket_name):
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
+    bucket = gcs_bucket.Bucket.lookup(bucket_name)
     acl = bucket.insert_default_object_acl(flask.request.data)
     return utils.message_to_rest(acl, KIND_OBJECT_ACL)
 
 
 @gcs.route("/b/<bucket_name>/defaultObjectAcl/<entity>", methods=["DELETE"])
 def bucket_default_object_acl_delete(bucket_name, entity):
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
+    bucket = gcs_bucket.Bucket.lookup(bucket_name)
     bucket.delete_default_object_acl(entity)
     return ""
 
 
 @gcs.route("/b/<bucket_name>/defaultObjectAcl/<entity>")
 def bucket_default_object_acl_get(bucket_name, entity):
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
+    bucket = gcs_bucket.Bucket.lookup(bucket_name)
     acl, _ = bucket.lookup_default_object_acl(entity)
     return utils.message_to_rest(acl, KIND_OBJECT_ACL)
 
 
 @gcs.route("/b/<bucket_name>/defaultObjectAcl/<entity>", methods=["PUT"])
 def bucket_default_object_acl_update(bucket_name, entity):
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
+    bucket = gcs_bucket.Bucket.lookup(bucket_name)
     role = json.loads(flask.request.data)["role"]
     data = resources.ObjectAccessControl(entity=entity, role=role)
     acl = bucket.insert_default_object_acl(data, update=True)
@@ -214,7 +214,7 @@ def bucket_default_object_acl_update(bucket_name, entity):
 
 @gcs.route("/b/<bucket_name>/defaultObjectAcl/<entity>", methods=["PATCH"])
 def bucket_default_object_acl_patch(bucket_name, entity):
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
+    bucket = gcs_bucket.Bucket.lookup(bucket_name)
     role = json.loads(flask.request.data)["role"]
     data = resources.ObjectAccessControl(entity=entity, role=role)
     acl = bucket.insert_default_object_acl(data, update=True)
@@ -223,7 +223,7 @@ def bucket_default_object_acl_patch(bucket_name, entity):
 
 @gcs.route("/b/<bucket_name>/notificationConfigs")
 def bucket_notification_list(bucket_name):
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
+    bucket = gcs_bucket.Bucket.lookup(bucket_name)
     result = resources.ListNotificationsResponse(items=bucket.notification)
     return utils.message_to_rest(
         result,
@@ -235,7 +235,7 @@ def bucket_notification_list(bucket_name):
 
 @gcs.route("/b/<bucket_name>/notificationConfigs", methods=["POST"])
 def bucket_notification_create(bucket_name):
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
+    bucket = gcs_bucket.Bucket.lookup(bucket_name)
     notification = bucket.insert_notification(flask.request.data)
     return utils.message_to_rest(
         notification, KIND_NOTIFICATION, preserving_proto_field_name=True,
@@ -244,14 +244,14 @@ def bucket_notification_create(bucket_name):
 
 @gcs.route("/b/<bucket_name>/notificationConfigs/<notification_id>", methods=["DELETE"])
 def bucket_notification_delete(bucket_name, notification_id):
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
+    bucket = gcs_bucket.Bucket.lookup(bucket_name)
     bucket.delete_notification(notification_id)
     return ""
 
 
 @gcs.route("/b/<bucket_name>/notificationConfigs/<notification_id>")
 def bucket_notification_get(bucket_name, notification_id):
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
+    bucket = gcs_bucket.Bucket.lookup(bucket_name)
     notification, _ = bucket.lookup_notification(notification_id)
     return utils.message_to_rest(
         notification, KIND_NOTIFICATION, preserving_proto_field_name=True,
@@ -260,20 +260,20 @@ def bucket_notification_get(bucket_name, notification_id):
 
 @gcs.route("/b/<bucket_name>/iam")
 def bucket_get_iam_policy(bucket_name):
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
+    bucket = gcs_bucket.Bucket.lookup(bucket_name)
     return utils.message_to_rest(bucket.iam_policy, KIND_POLICY)
 
 
 @gcs.route("/b/<bucket_name>/iam", methods=["PUT"])
 def bucket_set_iam_policy(bucket_name):
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
+    bucket = gcs_bucket.Bucket.lookup(bucket_name)
     bucket.insert_iam_policy(flask.request.data)
     return utils.message_to_rest(bucket.iam_policy, KIND_POLICY)
 
 
 @gcs.route("/b/<bucket_name>/iam/testPermissions")
 def bucket_test_iam_permissions(bucket_name):
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
+    bucket = gcs_bucket.Bucket.lookup(bucket_name)
     permissions = flask.request.args.getlist("permissions")
     result = {"kind": "storage#testIamPermissionsResponse", "permissions": permissions}
     return result
@@ -281,7 +281,7 @@ def bucket_test_iam_permissions(bucket_name):
 
 @gcs.route("/b/<bucket_name>/lockRetentionPolicy", methods=["POST"])
 def bucket_lock_retention_policy(bucket_name):
-    bucket = gcs_bucket.Bucket.lookup(bucket_name, flask.request)
+    bucket = gcs_bucket.Bucket.lookup(bucket_name)
     bucket.metadata.retention_policy.is_locked = True
     return bucket.to_rest(flask.request)
 
