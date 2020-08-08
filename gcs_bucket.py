@@ -3,8 +3,8 @@ import random
 import re
 
 from google.iam.v1 import policy_pb2
-from google.protobuf.message import Message
 from google.protobuf.json_format import MessageToDict, ParseDict
+from google.protobuf.message import Message
 
 import storage_resources_pb2 as resources
 import utils
@@ -16,10 +16,10 @@ class Bucket:
             self.metadata = metadata
         else:
             metadata = utils.process_data(metadata)
-            metadata["id"] = metadata["name"]
             if not self.__validate_bucket_name(metadata["name"]):
                 utils.abort(412, "Bucket name %s is invalid" % metadata["name"])
             self.metadata = ParseDict(metadata, resources.Bucket())
+        self.metadata.id = self.metadata.name
         self.notification = []
         self.iam_policy = None
         self.__init_acl()
