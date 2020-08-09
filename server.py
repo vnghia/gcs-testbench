@@ -1,4 +1,5 @@
 import argparse
+import base64
 import json
 import logging
 import os
@@ -13,6 +14,8 @@ from werkzeug import serving
 from werkzeug.middleware.dispatcher import DispatcherMiddleware
 
 import gcs_bucket
+import gcs_object
+import gcs_upload
 import storage_pb2 as storage
 import storage_pb2_grpc
 import storage_resources_pb2 as resources
@@ -32,9 +35,30 @@ KIND_NOTIFICATION = "storage#notification"
 grpc_server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
 
 
+def insert_test_bucket():
+    if len(utils.all_buckets()) == 0:
+        bucket_name = os.environ.get(
+            "GOOGLE_CLOUD_CPP_STORAGE_TEST_BUCKET_NAME", "test-bucket"
+        )
+        bucket_test = gcs_bucket.Bucket(json.dumps({"name": bucket_name}))
+        bucket_test.metadata.metageneration = 4
+        bucket_test.metadata.versioning.enabled = True
+
+
 class StorageServicer(storage_pb2_grpc.StorageServicer):
     def InsertBucket(self, request, context):
-        return resources.Bucket()
+        insert_test_bucket()
+        name = request.bucket.name
+        bucket = Bucket()
+        if testbench_utils.has_bucket(name):
+            context.set_details("Bucket %s already exists" % name)
+            context.set_code(grpc.StatusCode.ALREADY_EXISTS)
+            return bucket
+        bucket.id = name
+        bucket.name = name
+        dict_obj = MessageToDict(bucket)
+        print(request)
+        return testbench_utils.insert_bucket(bucket)
 
 
 def grpc_serve(port):
@@ -60,16 +84,6 @@ def index():
 GCS_HANDLER_PATH = "/storage/v1"
 gcs = flask.Flask(__name__)
 gcs.debug = True
-
-
-def insert_test_bucket():
-    if len(utils.all_buckets()) == 0:
-        bucket_name = os.environ.get(
-            "GOOGLE_CLOUD_CPP_STORAGE_TEST_BUCKET_NAME", "test-bucket"
-        )
-        bucket_test = gcs_bucket.Bucket(json.dumps({"name": bucket_name}))
-        bucket_test.metadata.metageneration = 4
-        bucket_test.metadata.versioning.enabled = True
 
 
 @gcs.route("/b", methods=["GET"])
@@ -289,33 +303,33 @@ def bucket_lock_retention_policy(bucket_name):
 @gcs.route("/b/<bucket_name>/o")
 def objects_list(bucket_name):
     insert_test_bucket()
-    objs, prefixes = gcs_object.Object.list(bucket_name)
-    result = {"items": [], "prefixes": prefixes, "nextPageToken": ""}
-    versions = flask.request.args.get("versions", False)
-    for obj in objs:
-        result["items"].append(obj.to_rest(flask.request, None))
-        if versions:
-            result["items"].extend(obj.old_metadatas_to_rest(flask.request, None))
-    return result
+    items, prefixes = gcs_object.Object.list(bucket_name, flask.request.args)
+    result = resources.ListObjectsResponse(items=items, prefixes=prefixes)
+    return utils.message_to_rest(
+        result,
+        "storage#objects",
+        flask.request.args.get("fields", None),
+        len(result.items),
+    )
 
 
 @gcs.route("/b/<bucket_name>/o/<path:object_name>", methods=["PUT"])
 def objects_update(bucket_name, object_name):
-    obj = gcs_object.Object.lookup(bucket_name, object_name, flask.request)
-    projection = obj.update(flask.request)
-    return obj.to_rest(flask.request, projection=projection)
+    obj = gcs_object.Object.lookup(bucket_name, object_name, flask.request.args)
+    obj.update(flask.request.data)
+    return obj.to_rest(flask.request)
 
 
 @gcs.route("/b/<bucket_name>/o/<path:object_name>", methods=["PATCH"])
 def objects_patch(bucket_name, object_name):
-    obj = gcs_object.Object.lookup(bucket_name, object_name, flask.request)
-    projection = obj.update(flask.request)
-    return obj.to_rest(flask.request, projection=projection)
+    obj = gcs_object.Object.lookup(bucket_name, object_name, flask.request.args)
+    obj.update(flask.request.data)
+    return obj.to_rest(flask.request)
 
 
 @gcs.route("/b/<bucket_name>/o/<path:object_name>", methods=["DELETE"])
 def objects_delete(bucket_name, object_name):
-    obj = gcs_object.Object.lookup(bucket_name, object_name, flask.request)
+    obj = gcs_object.Object.lookup(bucket_name, object_name, flask.request.args)
     obj.delete()
     return ""
 
@@ -328,8 +342,27 @@ upload.debug = True
 
 @upload.route("/b/<bucket_name>/o", methods=["POST"])
 def objects_insert(bucket_name):
-    obj = gcs_object.Object(bucket_name, request=flask.request)
-    return obj.to_rest(flask.request)
+    insert_test_bucket()
+    result = gcs_object.Object.insert(bucket_name, flask.request)
+    if isinstance(result, gcs_object.Object):
+        return result.to_rest(flask.request)
+    else:
+        return result
+
+
+@upload.route("/b/<bucket_name>/o", methods=["PUT"])
+def resumable_upload_chunk(bucket_name):
+    upload_id = flask.request.args.get("upload_id")
+    if upload_id is None:
+        utils.abort(400, "Missing upload_id in resumable_upload_chunk")
+    upload = gcs_upload.Upload.lookup(upload_id)
+    upload.process_request(flask.request)
+    if upload.complete:
+        obj = gcs_object.Object(upload.metadata, upload.media)
+        obj.metadata.metadata["x_testbench_upload"] = "resumable"
+        return obj.to_rest(flask.request)
+    else:
+        return upload.status_rest()
 
 
 # Define the WSGI application to handle bucket requests.
@@ -341,12 +374,63 @@ download.debug = True
 @gcs.route("/b/<bucket_name>/o/<path:object_name>")
 @download.route("/b/<bucket_name>/o/<path:object_name>")
 def objects_get(bucket_name, object_name):
-    obj = gcs_object.Object.lookup(bucket_name, object_name, flask.request)
+    obj = gcs_object.Object.lookup(bucket_name, object_name, flask.request.args)
     alt = flask.request.args.get("alt", "json")
     if alt == "json":
-        return obj.get_generation(flask.request)
+        return obj.to_rest(flask.request)
     else:
-        return obj.content
+        return obj.media_rest(flask.request)
+
+
+IAM_HANDLER_PATH = "/iamapi"
+iam = flask.Flask(__name__)
+iam.debug = True
+
+
+@iam.route("/projects/-/serviceAccounts/<service_account>:signBlob", methods=["POST"])
+def sign_blob(service_account):
+    """Implement the `projects.serviceAccounts.signBlob` API."""
+    payload = json.loads(flask.request.data)
+    if payload.get("payload") is None:
+        raise error_response.ErrorResponse(
+            "Missing payload in the payload", status_code=400
+        )
+    try:
+        blob = base64.b64decode(payload.get("payload"))
+    except TypeError:
+        raise error_response.ErrorResponse(
+            "payload must be base64-encoded", status_code=400
+        )
+    blob = b"signed: " + blob
+    response = {
+        "keyId": "fake-key-id-123",
+        "signedBlob": base64.b64encode(blob).decode("utf-8"),
+    }
+    return response
+
+
+# Define the WSGI application to handle (a few) requests in the XML API.
+XMLAPI_HANDLER_PATH = "/xmlapi"
+xmlapi = flask.Flask(__name__)
+xmlapi.debug = True
+
+
+@xmlapi.route("/<bucket_name>/<object_name>")
+def xmlapi_get_object(bucket_name, object_name):
+    """Implement the 'Objects: insert' API.  Insert a new GCS Object."""
+    if flask.request.args.get("acl") is not None:
+        utils.abort(500, "ACL query not supported in XML API")
+    if flask.request.args.get("encryption") is not None:
+        utils.abort(500, "Encryption query not supported in XML API")
+    obj = gcs_object.Object.lookup(bucket_name, object_name, flask.request.args)
+    return obj.media_rest(flask.request)
+
+
+@xmlapi.route("/<bucket_name>/<object_name>", methods=["PUT"])
+def xmlapi_put_object(bucket_name, object_name):
+    insert_test_bucket()
+    obj = gcs_object.Object.insert(bucket_name, flask.request, object_name)
+    return ""
 
 
 application = DispatcherMiddleware(
@@ -356,6 +440,8 @@ application = DispatcherMiddleware(
         GCS_HANDLER_PATH: gcs,
         UPLOAD_HANDLER_PATH: upload,
         DOWNLOAD_HANDLER_PATH: download,
+        IAM_HANDLER_PATH: iam,
+        XMLAPI_HANDLER_PATH: xmlapi,
     },
 )
 
