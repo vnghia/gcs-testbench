@@ -240,10 +240,10 @@ class Object:
             return cls.__insert_rest(bucket_name, request, xml_object_name)
 
     @classmethod
-    def lookup(cls, bucket_name, object_name, args=None):
+    def lookup(cls, bucket_name, object_name, args=None, context=None):
         obj = utils.check_object_generation(bucket_name, object_name, args)
         if obj is None:
-            utils.abort(404, "Bucket %s does not exist" % bucket_name)
+            utils.abort(404, "Bucket %s does not exist" % bucket_name, context)
         return obj
 
     def to_rest(self, request):

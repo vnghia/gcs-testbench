@@ -11,25 +11,29 @@ import utils
 
 
 class Bucket:
-    def __init__(self, metadata, args={}):
+    def __init__(self, metadata, args={}, context=None):
         if isinstance(metadata, resources.Bucket):
             self.metadata = metadata
         else:
             metadata = utils.process_data(metadata)
             if not self.__validate_bucket_name(metadata["name"]):
-                utils.abort(412, "Bucket name %s is invalid" % metadata["name"])
+                utils.abort(
+                    412, "Bucket name %s is invalid" % metadata["name"], context
+                )
             self.metadata = ParseDict(metadata, resources.Bucket())
         self.metadata.id = self.metadata.name
         self.notification = []
         self.iam_policy = None
         self.__init_acl()
-        self.__init_iam_policy()
+        self.__init_iam_policy(context)
         utils.insert_bucket(self)
 
     @classmethod
-    def list(cls, project):
+    def list(cls, project, context=None):
         if project is None or project.endswith("-"):
-            utils.abort(412, "Invalid or missing project id in `Buckets: list`")
+            utils.abort(
+                412, "Invalid or missing project id in `Buckets: list`", context
+            )
         return utils.all_buckets()
 
     @classmethod
@@ -54,10 +58,10 @@ class Bucket:
         return valid
 
     @classmethod
-    def lookup(cls, bucket_name, args=None):
+    def lookup(cls, bucket_name, args=None, context=None):
         bucket = utils.lookup_bucket(bucket_name)
         if bucket is None:
-            utils.abort(404, "Bucket %s does not exist" % bucket_name)
+            utils.abort(404, "Bucket %s does not exist" % bucket_name, context)
         metageneration = str(bucket.metadata.metageneration)
         metageneration_match = None
         metageneration_not_match = None
@@ -83,12 +87,14 @@ class Bucket:
                 412,
                 "Precondition Failed (metageneration = %s vs metageneration_not_match = %s)"
                 % (metageneration, metageneration_not_match),
+                context,
             )
         if metageneration_match is not None and metageneration_match != metageneration:
             utils.abort(
                 412,
                 "Precondition Failed (metageneration = %s vs metageneration_match = %s)"
                 % (metageneration, metageneration_match),
+                context,
             )
         return bucket
 
@@ -115,7 +121,7 @@ class Bucket:
             make_object_acl_proto("project-viewers-123456789", "READER")
         )
 
-    def __init_iam_policy(self):
+    def __init_iam_policy(self, context=None):
         role_mapping = {
             "READER": "roles/storage.legacyBucketReader",
             "WRITER": "roles/storage.legacyBucketWriter",
@@ -125,10 +131,10 @@ class Bucket:
         for entry in self.metadata.acl:
             legacy_role = entry.role
             if legacy_role is None or entry.entity is None:
-                utils.abort(500, "Invalid ACL entry")
+                utils.abort(500, "Invalid ACL entry", context)
             role = role_mapping.get(legacy_role)
             if role is None:
-                utils.abort(500, "Invalid legacy role %s" % legacy_role)
+                utils.abort(500, "Invalid legacy role %s" % legacy_role, context)
             bindings.append(policy_pb2.Binding(role=role, members=[entry.entity]))
         self.iam_policy = policy_pb2.Policy(
             version=1, bindings=bindings, etag=utils.compute_etag("__init_iam_policy"),

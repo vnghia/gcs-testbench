@@ -11,7 +11,7 @@ content_range_split = re.compile(r"bytes (\*|[0-9]+-[0-9]+)\/(\*|[0-9]+)")
 
 
 class Upload:
-    def __init__(self, bucket_name, request, resumable=True):
+    def __init__(self, bucket_name, request, resumable=True, context=None):
         host_url = ""
         self.inject_upload_data_error = False
         if isinstance(request, storage.InsertObjectSpec):
@@ -59,10 +59,10 @@ class Upload:
             utils.insert_upload(self)
 
     @classmethod
-    def lookup(cls, upload_id):
+    def lookup(cls, upload_id, context=None):
         upload = utils.lookup_upload(upload_id)
         if upload is None:
-            utils.abort(404, "Upload %s does not exist" % upload_id)
+            utils.abort(404, "Upload %s does not exist" % upload_id, context)
         return upload
 
     def to_rest(self):

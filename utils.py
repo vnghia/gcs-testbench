@@ -6,6 +6,7 @@ from datetime import timezone
 from random import random
 
 import flask
+import grpc
 from crc32c import crc32
 from dateutil.parser import parse
 from flatdict import FlatterDict
@@ -156,7 +157,14 @@ def extract_media(request):
 # error
 
 
-def abort(code, message):
+def abort(code, message, context=None):
+    if context is not None:
+        if not isinstance(code, type(grpc.StatusCode.OK)):
+            if code == 404:
+                code = grpc.StatusCode.NOT_FOUND
+            elif code == 400:
+                code = grpc.StatusCode.INTERNAL
+        context.abort(code, message)
     flask.abort(flask.make_response(flask.jsonify(message), code))
 
 

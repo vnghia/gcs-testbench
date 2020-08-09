@@ -9,6 +9,7 @@ import flask
 import grpc
 import httpbin
 from google.iam.v1 import policy_pb2
+from google.protobuf.empty_pb2 import Empty
 from google.protobuf.json_format import MessageToDict, ParseDict
 from werkzeug import serving
 from werkzeug.middleware.dispatcher import DispatcherMiddleware
@@ -48,17 +49,74 @@ def insert_test_bucket():
 class StorageServicer(storage_pb2_grpc.StorageServicer):
     def InsertBucket(self, request, context):
         insert_test_bucket()
-        name = request.bucket.name
-        bucket = Bucket()
-        if testbench_utils.has_bucket(name):
-            context.set_details("Bucket %s already exists" % name)
-            context.set_code(grpc.StatusCode.ALREADY_EXISTS)
-            return bucket
-        bucket.id = name
-        bucket.name = name
-        dict_obj = MessageToDict(bucket)
-        print(request)
-        return testbench_utils.insert_bucket(bucket)
+        bucket = gcs_bucket.Bucket(request.bucket, context=context)
+        return bucket.metadata
+
+    def ListBuckets(self, request, context):
+        insert_test_bucket()
+        result = resources.ListBucketsResponse(next_page_token="", items=[])
+        for name, b in gcs_bucket.Bucket.list(request.project, context=context):
+            result.items.append(b.metadata)
+        return result
+
+    def GetBucket(self, request, context):
+        bucket_name = request.bucket
+        bucket = gcs_bucket.Bucket.lookup(bucket_name, request, context=context)
+        return bucket.metadata
+
+    def DeleteBucket(self, request, context):
+        bucket_name = request.bucket
+        bucket = gcs_bucket.Bucket.lookup(bucket_name, request, context=context)
+        bucket.delete()
+        return Empty()
+
+    def InsertObject(self, request_iterator, context):
+        upload = None
+        for request in request_iterator:
+            first_message = request.WhichOneof("first_message")
+            if first_message == "upload_id":
+                upload = gcs_upload.Upload.lookup(request.upload_id, context=context)
+            elif first_message == "insert_object_spec":
+                insert_object_spec = request.insert_object_spec
+                upload = gcs_upload.Upload(
+                    insert_object_spec.resource.bucket,
+                    insert_object_spec,
+                    resumable=False,
+                )
+            upload.media += request.checksummed_data.content
+            upload.committed_size = len(upload.media)
+            if request.finish_write:
+                upload.complete = True
+                break
+        if not upload.complete:
+            utils.abort(400, "Request does not set finish_write", context=context)
+        obj = gcs_object.Object(upload.metadata, upload.media)
+        return obj.metadata
+
+    def GetObjectMedia(self, request, context):
+        obj = gcs_object.Object.lookup(request.bucket, request.object, request)
+        yield storage.GetObjectMediaResponse(
+            checksummed_data={"content": obj.media}, metadata=obj.metadata
+        )
+
+    def DeleteObject(self, request, context):
+        obj = gcs_object.Object.lookup(request.bucket, request.object, request)
+        obj.delete()
+        return Empty()
+
+    def StartResumableWrite(self, request, context):
+        insert_object_spec = request.insert_object_spec
+        upload = gcs_upload.Upload(
+            insert_object_spec.resource.bucket, insert_object_spec
+        )
+        upload.metadata.metadata["x_testbench_upload"] = "resumable"
+        return storage.StartResumableWriteResponse(upload_id=upload.upload_id)
+
+    def QueryWriteStatus(self, request, context):
+        upload = gcs_upload.Upload.lookup(request.upload_id, context=context)
+        return storage.QueryWriteStatusResponse(
+            committed_size=upload.committed_size, complete=upload.complete
+        )
 
 
 def grpc_serve(port):
