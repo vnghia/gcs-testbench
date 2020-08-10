@@ -33,8 +33,9 @@ KIND_NOTIFICATION = "storage#notification"
 
 # GPRC
 
-
-grpc_server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
+grpc_server = grpc.server(
+    futures.ThreadPoolExecutor(max_workers=10, thread_name_prefix="gcs-testbench")
+)
 
 
 def insert_test_bucket():
@@ -509,7 +510,7 @@ application = DispatcherMiddleware(
 
 def rest_serve(port):
     serving.run_simple(
-        "localhost", int(port), application, use_reloader=True, use_evalex=True,
+        "localhost", int(port), application, use_reloader=False, threaded=True,
     )
 
 
