@@ -168,7 +168,7 @@ def abort(code, message, context=None):
     flask.abort(flask.make_response(flask.jsonify(message), code))
 
 
-def check_generation(generation, match, not_match, is_meta):
+def check_generation(generation, match, not_match, is_meta, context=None):
     generation = int(generation) if generation is not None else None
     match = int(match) if match is not None else None
     not_match = int(not_match) if not_match is not None else None
@@ -178,12 +178,14 @@ def check_generation(generation, match, not_match, is_meta):
             412,
             "Precondition Failed (%s = %s vs %s_not_match = %s)"
             % (message, generation, message, not_match),
+            context,
         )
     if generation is not None and match is not None and match != generation:
         abort(
             412,
             "Precondition Failed (%s = %s vs %s_match = %s)"
             % (message, generation, message, match),
+            context,
         )
     return True
 
@@ -245,10 +247,10 @@ def all_objects(bucket_name, versions):
     ]
 
 
-def lookup_object(bucket_name, object_name):
+def lookup_object(bucket_name, object_name, context=None):
     bucket = GCS_OBJECTS.get(bucket_name)
     if bucket is None:
-        abort(404, "Bucket %s does not exist" % bucket_name)
+        abort(404, "Bucket %s does not exist" % bucket_name, context=context)
     return bucket.get(object_name)
 
 
@@ -273,8 +275,8 @@ def insert_object(bucket_name, obj):
     GCS_OBJECTS[bucket_name][obj.metadata.name] = obj
 
 
-def check_object_generation(bucket_name, object_name, args):
-    obj = lookup_object(bucket_name, object_name)
+def check_object_generation(bucket_name, object_name, args, context=None):
+    obj = lookup_object(bucket_name, object_name, context=context)
     generation = obj.metadata.generation if obj is not None else 0
     generation_match = None
     generation_not_match = None
@@ -292,7 +294,9 @@ def check_object_generation(bucket_name, object_name, args):
     elif args is not None:
         generation_match = args.get("ifGenerationMatch", None)
         generation_not_match = args.get("ifGenerationNotMatch", None)
-    check_generation(generation, generation_match, generation_not_match, False)
+    check_generation(
+        generation, generation_match, generation_not_match, False, context=context
+    )
     metageneration = obj.metadata.metageneration if obj is not None else None
     metageneration_match = None
     metageneration_not_match = None
@@ -311,7 +315,11 @@ def check_object_generation(bucket_name, object_name, args):
         metageneration_match = args.get("ifMetagenerationMatch", None)
         metageneration_not_match = args.get("ifMetagenerationNotMatch", None)
     check_generation(
-        metageneration, metageneration_match, metageneration_not_match, True
+        metageneration,
+        metageneration_match,
+        metageneration_not_match,
+        True,
+        context=context,
     )
     return obj
 

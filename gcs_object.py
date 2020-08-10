@@ -241,7 +241,9 @@ class Object:
 
     @classmethod
     def lookup(cls, bucket_name, object_name, args=None, context=None):
-        obj = utils.check_object_generation(bucket_name, object_name, args)
+        obj = utils.check_object_generation(
+            bucket_name, object_name, args, context=context
+        )
         if obj is None:
             utils.abort(404, "Bucket %s does not exist" % bucket_name, context)
         return obj

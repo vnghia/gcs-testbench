@@ -3,6 +3,7 @@ import base64
 import json
 import logging
 import os
+import threading
 from concurrent import futures
 
 import flask
@@ -71,6 +72,7 @@ class StorageServicer(storage_pb2_grpc.StorageServicer):
         return Empty()
 
     def InsertObject(self, request_iterator, context):
+        insert_test_bucket()
         upload = None
         for request in request_iterator:
             first_message = request.WhichOneof("first_message")
@@ -82,6 +84,7 @@ class StorageServicer(storage_pb2_grpc.StorageServicer):
                     insert_object_spec.resource.bucket,
                     insert_object_spec,
                     resumable=False,
+                    context=context,
                 )
             upload.media += request.checksummed_data.content
             upload.committed_size = len(upload.media)
@@ -107,7 +110,7 @@ class StorageServicer(storage_pb2_grpc.StorageServicer):
     def StartResumableWrite(self, request, context):
         insert_object_spec = request.insert_object_spec
         upload = gcs_upload.Upload(
-            insert_object_spec.resource.bucket, insert_object_spec
+            insert_object_spec.resource.bucket, insert_object_spec, context=context
         )
         upload.metadata.metadata["x_testbench_upload"] = "resumable"
         return storage.StartResumableWriteResponse(upload_id=upload.upload_id)

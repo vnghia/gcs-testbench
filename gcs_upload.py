@@ -16,7 +16,7 @@ class Upload:
         self.inject_upload_data_error = False
         if isinstance(request, storage.InsertObjectSpec):
             utils.check_object_generation(
-                request.resource.bucket, request.resource.name, request
+                request.resource.bucket, request.resource.name, request, context=context
             )
             self.metadata = request.resource
         else:
