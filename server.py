@@ -31,6 +31,7 @@ from werkzeug.middleware.dispatcher import DispatcherMiddleware
 
 import gcs_bucket
 import gcs_object
+import gcs_project
 import gcs_upload
 import storage_pb2 as storage
 import storage_pb2_grpc
@@ -509,6 +510,10 @@ def xmlapi_put_object(bucket_name, object_name):
     return ""
 
 
+# Define the WSGI application to handle HMAC key requests
+(PROJECTS_HANDLER_PATH, projects_app) = gcs_project.get_projects_app()
+
+
 application = DispatcherMiddleware(
     root,
     {
@@ -518,6 +523,7 @@ application = DispatcherMiddleware(
         DOWNLOAD_HANDLER_PATH: download,
         IAM_HANDLER_PATH: iam,
         XMLAPI_HANDLER_PATH: xmlapi,
+        PROJECTS_HANDLER_PATH: projects_app,
     },
 )
 

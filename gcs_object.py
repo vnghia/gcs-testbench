@@ -124,7 +124,7 @@ class Object:
         metadata, media_headers, media = cls.__parse_multipart_rest_request(request)
         instructions = request.headers.get("x-goog-testbench-instructions")
         if instructions == "inject-upload-data-error":
-            media = testbench_utils.corrupt_media(media)
+            media = utils.corrupt_media(media)
         metadata["name"] = request.args.get("name", metadata.get("name", None))
         if metadata["name"] is None:
             utils.abort(412, "name not set in Objects: insert")
@@ -149,7 +149,7 @@ class Object:
         metadata["metadata"]["x_testbench_upload"] = "multipart"
         if "md5Hash" in metadata:
             metadata["metadata"]["x_testbench_md5"] = metadata["md5Hash"]
-            actual_md5Hash = md5(media).hexdigit()
+            actual_md5Hash = md5(media).hexdigest()
             if actual_md5Hash != metadata["md5Hash"]:
                 utils.abort(
                     412,
@@ -194,8 +194,8 @@ class Object:
         if goog_hash is not None:
             for hash in goog_hash.split(","):
                 if hash.startswith("md5="):
-                    md5hash = hash[4:]
-                    actual_md5Hash = md5(media).hexdigit()
+                    md5Hash = hash[4:]
+                    actual_md5Hash = md5(media).hexdigest()
                     if actual_md5Hash != md5Hash:
                         utils.abort(
                             412,
