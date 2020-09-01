@@ -104,7 +104,7 @@ class Object:
             result = list(filter(None, result))
             headers = dict()
             if len(result) < 2:
-                utils.abort(412, "Could not parse %s" % str(part))
+                result.append(b"")
             for header in result[:-1]:
                 key, value = header.split(b": ")
                 headers[key.decode("utf-8")] = value.decode("utf-8")
