@@ -469,15 +469,11 @@ def sign_blob(service_account):
     """Implement the `projects.serviceAccounts.signBlob` API."""
     payload = json.loads(flask.request.data)
     if payload.get("payload") is None:
-        raise error_response.ErrorResponse(
-            "Missing payload in the payload", status_code=400
-        )
+        utils.abort(400, "Missing payload in the payload")
     try:
         blob = base64.b64decode(payload.get("payload"))
     except TypeError:
-        raise error_response.ErrorResponse(
-            "payload must be base64-encoded", status_code=400
-        )
+        utils.abort(400, "payload must be base64-encoded")
     blob = b"signed: " + blob
     response = {
         "keyId": "fake-key-id-123",

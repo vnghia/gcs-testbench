@@ -16,7 +16,6 @@ import json
 import random
 import re
 from datetime import datetime, timezone
-from hashlib import md5
 
 import flask
 from crc32c import crc32
@@ -49,7 +48,14 @@ class Object:
         )
         self.media = media
         self.metadata.size = len(self.media)
-        self.metadata.md5_hash = md5(self.media).hexdigest()
+        actual_md5Hash = utils.compute_md5(media)
+        if self.metadata.md5_hash != "" and actual_md5Hash != self.metadata.md5_hash:
+            utils.abort(
+                412,
+                "Object checksum md5 does not match. Expected %s Actual %s"
+                % (actual_md5Hash, self.metadata.md5_hash),
+            )
+        self.metadata.md5_hash = actual_md5Hash
         self.metadata.crc32c.value = crc32(self.media)
         self.metadata.time_created.FromDatetime(timestamp)
         self.metadata.updated.FromDatetime(timestamp)
@@ -139,21 +145,23 @@ class Object:
                     "Content-Type specified in the upload (%s) does not match"
                     + "contentType specified in the metadata (%s)."
                 )
-                % (media_headers.get("content-type"), resource.get("contentType")),
+                % (media_headers.get("content-type"), metadata.get("contentType")),
             )
         utils.check_object_generation(bucket_name, metadata["name"], request.args)
         metadata["bucket"] = bucket_name
         if "contentType" not in metadata:
             metadata["contentType"] = media_headers.get("content-type")
-        metadata["metadata"] = dict()
+        metadata["metadata"] = (
+            dict() if "metadata" not in metadata else metadata["metadata"]
+        )
         metadata["metadata"]["x_testbench_upload"] = "multipart"
         if "md5Hash" in metadata:
             metadata["metadata"]["x_testbench_md5"] = metadata["md5Hash"]
-            actual_md5Hash = md5(media).hexdigest()
+            actual_md5Hash = utils.compute_md5(media)
             if actual_md5Hash != metadata["md5Hash"]:
                 utils.abort(
                     412,
-                    "Object checksum does not match. Expected %s Actual %s"
+                    "Object checksum md5 does not match. Expected %s Actual %s"
                     % (actual_md5Hash, metadata["md5Hash"]),
                 )
             del metadata["md5Hash"]
@@ -163,7 +171,7 @@ class Object:
             if actual_crc32c != metadata["crc32c"]:
                 utils.abort(
                     400,
-                    "Object checksum does not match. Expected %s Actual %s"
+                    "Object checksum crc32c does not match. Expected %s Actual %s"
                     % (actual_crc32c, metadata["crc32c"]),
                 )
             del metadata["crc32c"]
@@ -175,7 +183,7 @@ class Object:
         media = utils.extract_media(request)
         instructions = request.headers.get("x-goog-testbench-instructions")
         if instructions == "inject-upload-data-error":
-            media = testbench_utils.corrupt_media(media)
+            media = utils.corrupt_media(media)
         metadata = dict()
         metadata["bucket"] = bucket_name
         metadata["name"] = object_name
@@ -195,11 +203,11 @@ class Object:
             for hash in goog_hash.split(","):
                 if hash.startswith("md5="):
                     md5Hash = hash[4:]
-                    actual_md5Hash = md5(media).hexdigest()
+                    actual_md5Hash = utils.compute_md5(media)
                     if actual_md5Hash != md5Hash:
                         utils.abort(
                             412,
-                            "Object checksum does not match. Expected %s Actual %s"
+                            "Object checksum md5 does not match. Expected %s Actual %s"
                             % (actual_md5Hash, md5Hash),
                         )
                 if hash.startswith("crc32c="):
@@ -208,7 +216,7 @@ class Object:
                     if actual_crc32c != crc32c:
                         utils.abort(
                             400,
-                            "Object checksum does not match. Expected %s Actual %s"
+                            "Object checksum crc32c does not match. Expected %s Actual %s"
                             % (actual_crc32c, crc32c),
                         )
         utils.check_object_generation(bucket_name, object_name, args)
@@ -232,7 +240,7 @@ class Object:
             instructions = request.headers.get("x-goog-testbench-instructions")
             media = utils.extract_media(request)
             if instructions == "inject-upload-data-error":
-                media = testbench_utils.corrupt_media(media)
+                media = utils.corrupt_media(media)
             if object_name is None:
                 utils.abort(412, "name not set in Objects: insert")
             utils.check_object_generation(bucket_name, object_name, request.args)
@@ -300,6 +308,7 @@ class Object:
         instructions = request.headers.get("x-goog-testbench-instructions")
         media = self.media
         if instructions == "return-corrupted-data":
+            print("return-corrupted-data")
             media = utils.corrupt_media(media)
         response = flask.make_response(media)
         response.headers["x-goog-hash"] = ""
@@ -308,7 +317,7 @@ class Object:
                 self.metadata.crc32c.value
             )
         if "x_testbench_md5" in self.metadata.metadata:
-            response.headers["x-goog-hash"] += ",md5Hash=" + str(self.metadata.md5)
+            response.headers["x-goog-hash"] += ",md5=" + str(self.metadata.md5_hash)
         if response.headers["x-goog-hash"] == "":
             del response.headers["x-goog-hash"]
         return response

@@ -14,6 +14,7 @@
 
 import base64
 import json
+import hashlib
 import re
 import struct
 from datetime import timezone
@@ -53,6 +54,10 @@ def encode_crc32c(value):
     if not isinstance(value, int):
         return value
     return base64.b64encode(struct.pack(">I", value)).decode("utf-8")
+
+
+def compute_md5(content):
+    return base64.b64encode(hashlib.md5(content).digest()).decode("utf-8")
 
 
 # protobuf <-> rest
