@@ -437,9 +437,18 @@ def resumable_upload_chunk(bucket_name):
     if upload.complete:
         obj = gcs_object.Object(upload.metadata, upload.media)
         obj.metadata.metadata["x_testbench_upload"] = "resumable"
-        return obj.to_rest(flask.request)
+        return obj.to_rest(flask.request, upload.args.get("fields"))
     else:
         return upload.status_rest()
+
+
+@upload.route("/b/<bucket_name>/o", methods=["DELETE"])
+def delete_resumable_upload(bucket_name):
+    upload_id = flask.request.args.get("upload_id")
+    if upload_id is None:
+        utils.abort(400, "Missing upload_id in delete_resumable_upload")
+    gcs_upload.Upload.delete(upload_id)
+    return flask.make_response("", 499, {"content-length": 0})
 
 
 # Define the WSGI application to handle bucket requests.

@@ -56,9 +56,9 @@ class Upload:
                 metadata["name"] = request.args.get("name")
             if metadata.get("name") is None:
                 utils.abort(400, "Missing object name argument")
-            utils.check_object_generation(bucket_name, metadata["name"], request.args)
             self.metadata = ParseDict(utils.process_data(metadata), resources.Object())
             host_url = request.host_url
+            self.args = request.args
         self.upload_id = utils.compute_etag(
             self.metadata.bucket + "/o/" + self.metadata.name
         ).decode("utf-8")
@@ -80,6 +80,10 @@ class Upload:
             utils.abort(404, "Upload %s does not exist" % upload_id, context)
         return upload
 
+    @classmethod
+    def delete(cls, upload_id):
+        utils.delete_upload(upload_id)
+
     def to_rest(self):
         response = flask.make_response("")
         response.headers["Location"] = self.location
@@ -97,6 +101,9 @@ class Upload:
         pass
 
     def __process_request_rest(self, request):
+        utils.check_object_generation(
+            self.metadata.bucket, self.metadata.name, self.args
+        )
         content_range = request.headers.get("content-range")
         content_length = request.headers.get("content-length")
         if content_range is not None:

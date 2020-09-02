@@ -30,7 +30,7 @@ import utils
 
 
 class Object:
-    def __init__(self, metadata, media, args={}):
+    def __init__(self, metadata, media, args={}, request=None, context=None):
         timestamp = datetime.now(timezone.utc)
         if isinstance(metadata, resources.Object):
             self.metadata = metadata
@@ -54,6 +54,7 @@ class Object:
                 412,
                 "Object checksum md5 does not match. Expected %s Actual %s"
                 % (actual_md5Hash, self.metadata.md5_hash),
+                context,
             )
         self.metadata.md5_hash = actual_md5Hash
         self.metadata.crc32c.value = crc32(self.media)
@@ -175,6 +176,7 @@ class Object:
                     % (actual_crc32c, metadata["crc32c"]),
                 )
             del metadata["crc32c"]
+        metadata.update(utils.extract_encryption(request))
         obj = Object(metadata, media)
         return obj
 
@@ -244,7 +246,10 @@ class Object:
             if object_name is None:
                 utils.abort(412, "name not set in Objects: insert")
             utils.check_object_generation(bucket_name, object_name, request.args)
-            obj = Object({"bucket": bucket_name, "name": object_name}, media,)
+            obj = Object(
+                {"bucket": bucket_name, "name": object_name},
+                media,
+            )
             obj.metadata.metadata["x_testbench_upload"] = "simple"
             return obj
         if upload_type == "multipart":
@@ -270,13 +275,15 @@ class Object:
             utils.abort(404, "Bucket %s does not exist" % bucket_name, context)
         return obj
 
-    def to_rest(self, request):
+    def to_rest(self, request, fields=None):
         projection = "noAcl"
         if b"acl" in request.data:
             projection = "full"
         projection = request.args.get("projection", projection)
         result = utils.message_to_rest(
-            self.metadata, "storage#object", request.args.get("fields", None),
+            self.metadata,
+            "storage#object",
+            request.args.get("fields", fields),
         )
         if projection == "noAcl":
             result.pop("acl", None)

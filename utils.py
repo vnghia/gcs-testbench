@@ -142,7 +142,7 @@ def message_to_rest(
             flat[key] = parse(flat[key]).strftime("%Y-%m-%d")
         if key.endswith("crc32c"):
             flat[key] = encode_crc32c(flat[key])
-        if len(keep) > 0:
+        if fields is not None:
             re_key = remove_index.sub("", key)
             if re_key not in keep:
                 delete_key.append(key)
@@ -171,6 +171,57 @@ def extract_media(request):
     if request.environ.get("HTTP_TRANSFER_ENCODING", "") == "chunked":
         return request.environ.get("wsgi.input").read()
     return request.data
+
+
+def raise_csek_error(code=400):
+    msg = "Missing a SHA256 hash of the encryption key, or it is not"
+    msg += " base64 encoded, or it does not match the encryption key."
+    link = "https://cloud.google.com/storage/docs/encryption#customer-supplied_encryption_keys"
+    error = {
+        "error": {
+            "errors": [
+                {
+                    "domain": "global",
+                    "reason": "customerEncryptionKeySha256IsInvalid",
+                    "message": msg,
+                    "extendedHelp": link,
+                }
+            ],
+            "code": code,
+            "message": msg,
+        }
+    }
+    abort(code, json.dumps(error))
+
+
+def validate_customer_encryption_headers(key_header, hash_header, algo_header):
+    if algo_header != "AES256":
+        abort(400, "Invalid or missing algorithm %s for CSEK" % algo_header)
+
+    key = base64.standard_b64decode(key_header)
+    if key is None or len(key) != 256 / 8:
+        raise_csek_error()
+
+    h = hashlib.sha256()
+    h.update(key)
+    expected = base64.standard_b64encode(h.digest()).decode("utf-8")
+    if hash_header is None or expected != hash_header:
+        raise_csek_error()
+
+
+def extract_encryption(request):
+    algo_header = request.headers.get("x-goog-encryption-algorithm")
+    if algo_header is None:
+        return {}
+    hash_header = request.headers.get("x-goog-encryption-key-sha256")
+    key_header = request.headers.get("x-goog-encryption-key")
+    validate_customer_encryption_headers(key_header, hash_header, algo_header)
+    return {
+        "customerEncryption": {
+            "encryptionAlgorithm": algo_header,
+            "keySha256": hash_header,
+        },
+    }
 
 
 # error
