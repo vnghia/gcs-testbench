@@ -15,6 +15,7 @@
 import json
 import random
 import re
+import time
 from datetime import datetime, timezone
 
 import flask
@@ -443,18 +444,71 @@ class Object:
 
     def media_rest(self, request):
         instructions = request.headers.get("x-goog-testbench-instructions")
-        media = self.media
-        if instructions == "return-corrupted-data":
-            print("return-corrupted-data")
-            media = utils.corrupt_media(media)
-        response = flask.make_response(media)
-        response.headers["x-goog-hash"] = ""
-        if "x_testbench_crc32c" in self.metadata.metadata:
-            response.headers["x-goog-hash"] += "crc32c=" + utils.encode_crc32c(
-                self.metadata.crc32c.value
+        begin = 0
+        end = len(self.media)
+        if request.range is not None:
+            begin = (
+                request.range.ranges[0][0]
+                if request.range.ranges[0][0] is not None
+                else begin
             )
+            end = (
+                request.range.ranges[0][1]
+                if request.range.ranges[0][1] is not None
+                else end
+            )
+        length = len(self.media)
+        response_stream = None
+        content_range = "bytes %d-%d/%d" % (begin, end - 1, length)
+
+        def streamer():
+            return self.media[begin:end]
+
+        response_stream = streamer
+
+        if instructions == "return-corrupted-data":
+            media = utils.corrupt_media(self.media[begin:end])
+
+            def streamer():
+                return media
+
+            response_stream = streamer
+
+        if instructions is not None and instructions.startswith(u"stall-always"):
+
+            def streamer():
+                chunk_size = 16 * 1024
+                for r in range(begin, end, chunk_size):
+                    chunk_end = min(r + chunk_size, end)
+                    if r == begin:
+                        time.sleep(10)
+                    yield self.media[r:chunk_end]
+
+            response_stream = streamer
+
+        if instructions == "stall-at-256KiB" and begin == 0:
+
+            def streamer():
+                chunk_size = 16 * 1024
+                for r in range(begin, end, chunk_size):
+                    chunk_end = min(r + chunk_size, end)
+                    if r == 256 * 1024:
+                        time.sleep(10)
+                    yield self.media[r:chunk_end]
+
+            response_stream = streamer
+
+        headers = {
+            "Content-Range": content_range,
+            "x-goog-hash": self.__x_goog_hash_header(),
+            "x-goog-generation": self.metadata.generation,
+        }
+        return flask.Response(response_stream(), status=200, headers=headers)
+
+    def __x_goog_hash_header(self):
+        header = ""
+        if "x_testbench_crc32c" in self.metadata.metadata:
+            header += "crc32c=" + utils.encode_crc32c(self.metadata.crc32c.value)
         if "x_testbench_md5" in self.metadata.metadata:
-            response.headers["x-goog-hash"] += ",md5=" + str(self.metadata.md5_hash)
-        if response.headers["x-goog-hash"] == "":
-            del response.headers["x-goog-hash"]
-        return response
+            header += ",md5=" + str(self.metadata.md5_hash)
+        return header if header != "" else None
