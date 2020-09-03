@@ -30,7 +30,7 @@ import utils
 
 
 class Object:
-    def __init__(self, metadata, media, args={}, request=None, context=None):
+    def __init__(self, metadata, media, args={}, headers={}, context=None):
         timestamp = datetime.now(timezone.utc)
         if isinstance(metadata, resources.Object):
             self.metadata = metadata
@@ -268,12 +268,142 @@ class Object:
 
     @classmethod
     def lookup(cls, bucket_name, object_name, args=None, context=None):
+        if isinstance(args, Message):
+            current_generation = str(args.generation) if args.generation != 0 else ""
+        else:
+            current_generation = (
+                str(args.get("generation"))
+                if args is not None and args.get("generation") is not None
+                else ""
+            )
         obj = utils.check_object_generation(
-            bucket_name, object_name, args, context=context
+            bucket_name, object_name, args, current_generation, context=context
         )
         if obj is None:
-            utils.abort(404, "Bucket %s does not exist" % bucket_name, context)
+            utils.abort(404, "Object %s does not exist" % object_name, context)
         return obj
+
+    def lookup_acl(self, entity):
+        for i in range(len(self.metadata.acl)):
+            if self.metadata.acl[i].entity == entity:
+                return self.metadata.acl[i], i
+        utils.abort(404, "Acl %s does not exist" % entity)
+
+    def insert_acl(self, data, update=False):
+        acl = (
+            data
+            if isinstance(data, resources.ObjectAccessControl)
+            else ParseDict(utils.process_data(data), resources.ObjectAccessControl())
+        )
+        acl.etag = utils.random_etag(acl.entity + acl.role)
+        acl.id = self.metadata.name + "/" + acl.entity
+        acl.bucket = self.metadata.bucket
+        if update:
+            _, index = self.lookup_acl(acl.entity)
+            self.metadata.acl[index].MergeFrom(acl)
+            return self.metadata.acl[index]
+        else:
+            self.metadata.acl.append(acl)
+            return acl
+
+    def delete_acl(self, entity):
+        _, index = self.lookup_acl(entity)
+        del self.metadata.acl[index]
+
+    def __update_acl(self, args, headers):
+        predefined_acl = None
+        if headers.get("x-goog-acl") is not None:
+            acl2json_mapping = {
+                "authenticated-read": "authenticatedRead",
+                "bucket-owner-full-control": "bucketOwnerFullControl",
+                "bucket-owner-read": "bucketOwnerRead",
+                "private": "private",
+                "project-private": "projectPrivate",
+                "public-read": "publicRead",
+            }
+            acl = headers.get("x-goog-acl")
+            predefined_acl = acl2json_mapping.get(acl)
+            if predefined_acl is None:
+                utils.abort(400, "Invalid predefinedAcl value %s" % acl)
+        else:
+            predefined_acl = args.get("predefinedAcl")
+        if predefined_acl is None:
+            predefined_acl = "projectPrivate"
+        owner_entity = "project-owners-123456789"
+        self.metadata.acl.append(
+            utils.make_object_acl_proto(
+                self.metadata.bucket,
+                owner_entity,
+                "OWNER",
+                self.metadata.name,
+            )
+        )
+        acl = None
+        if predefined_acl == "authenticatedRead":
+            acl = [
+                utils.make_object_acl_proto(
+                    self.metadata.bucket,
+                    "allAuthenticatedUsers",
+                    "READER",
+                    self.metadata.name,
+                )
+            ]
+        elif predefined_acl == "bucketOwnerFullControl":
+            acl = [
+                utils.make_object_acl_proto(
+                    self.metadata.bucket,
+                    owner_entity,
+                    "OWNER",
+                    self.metadata.name,
+                )
+            ]
+        elif predefined_acl == "bucketOwnerRead":
+            acl = [
+                utils.make_object_acl_proto(
+                    self.metadata.bucket,
+                    owner_entity,
+                    "READER",
+                    self.metadata.name,
+                )
+            ]
+        elif predefined_acl == "private":
+            acl = [
+                utils.make_object_acl_proto(
+                    self.metadata.bucket,
+                    "project-owners",
+                    "OWNER",
+                    self.metadata.name,
+                )
+            ]
+        elif predefined_acl == "publicRead":
+            acl = [
+                utils.make_object_acl_proto(
+                    self.metadata.bucket,
+                    "allUsers",
+                    "READER",
+                    self.metadata.name,
+                )
+            ]
+        elif predefined_acl == "projectPrivate":
+            acl = [
+                utils.make_object_acl_proto(
+                    self.metadata.bucket,
+                    "project-editors-123456789",
+                    "OWNER",
+                    self.metadata.name,
+                ),
+                utils.make_object_acl_proto(
+                    self.metadata.bucket,
+                    "project-viewers-123456789",
+                    "READER",
+                    self.metadata.name,
+                ),
+            ]
+        else:
+            utils.abort(400, "Invalid predefinedAcl value")
+        for item in acl:
+            self.insert_acl(item)
+        pass
 
     def to_rest(self, request, fields=None):
         projection = "noAcl"

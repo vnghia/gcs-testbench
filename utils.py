@@ -127,7 +127,11 @@ def fields_to_list(fields):
 
 
 def message_to_rest(
-    message, kind, fields=None, list_size=0, preserving_proto_field_name=False,
+    message,
+    kind,
+    fields=None,
+    list_size=0,
+    preserving_proto_field_name=False,
 ):
     flat = FlatterDict(
         MessageToDict(message, preserving_proto_field_name=preserving_proto_field_name)
@@ -317,11 +321,18 @@ def all_objects(bucket_name, versions):
     ]
 
 
-def lookup_object(bucket_name, object_name, context=None):
+def lookup_object(bucket_name, object_name, current_generation="", context=None):
     bucket = GCS_OBJECTS.get(bucket_name)
     if bucket is None:
         abort(404, "Bucket %s does not exist" % bucket_name, context=context)
-    return bucket.get(object_name)
+    obj = bucket.get(object_name)
+    if current_generation == "":
+        return obj
+    else:
+        if obj is None:
+            return bucket.get(object_name + "#" + current_generation)
+        elif str(obj.metadata.generation) == current_generation:
+            return obj
 
 
 def delete_object(bucket_name, object_name):
@@ -345,8 +356,10 @@ def insert_object(bucket_name, obj):
     GCS_OBJECTS[bucket_name][obj.metadata.name] = obj
 
 
-def check_object_generation(bucket_name, object_name, args, context=None):
-    obj = lookup_object(bucket_name, object_name, context=context)
+def check_object_generation(
+    bucket_name, object_name, args, current_generation="", context=None
+):
+    obj = lookup_object(bucket_name, object_name, current_generation, context=context)
     generation = obj.metadata.generation if obj is not None else 0
     generation_match = None
     generation_not_match = None
@@ -404,3 +417,12 @@ def delete_upload(upload_id):
 
 def insert_upload(upload):
     GCS_UPLOADS[upload.upload_id] = upload
+
+
+# ACL
+
+
+def make_object_acl_proto(bucket_name, entity, role, object_name=""):
+    return resources.ObjectAccessControl(
+        bucket=bucket_name, entity=entity, role=role, object=object_name
+    )

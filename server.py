@@ -54,10 +54,10 @@ grpc_server = grpc.server(
 
 
 def insert_test_bucket():
-    if len(utils.all_buckets()) == 0:
-        bucket_name = os.environ.get(
-            "GOOGLE_CLOUD_CPP_STORAGE_TEST_BUCKET_NAME", "test-bucket"
-        )
+    bucket_name = os.environ.get(
+        "GOOGLE_CLOUD_CPP_STORAGE_TEST_BUCKET_NAME", "test-bucket"
+    )
+    if utils.lookup_bucket(bucket_name) is None:
         bucket_test = gcs_bucket.Bucket(json.dumps({"name": bucket_name}))
         bucket_test.metadata.metageneration = 4
         bucket_test.metadata.versioning.enabled = True
@@ -329,7 +329,9 @@ def bucket_notification_create(bucket_name):
     bucket = gcs_bucket.Bucket.lookup(bucket_name)
     notification = bucket.insert_notification(flask.request.data)
     return utils.message_to_rest(
-        notification, KIND_NOTIFICATION, preserving_proto_field_name=True,
+        notification,
+        KIND_NOTIFICATION,
+        preserving_proto_field_name=True,
     )
 
 
@@ -345,7 +347,9 @@ def bucket_notification_get(bucket_name, notification_id):
     bucket = gcs_bucket.Bucket.lookup(bucket_name)
     notification, _ = bucket.lookup_notification(notification_id)
     return utils.message_to_rest(
-        notification, KIND_NOTIFICATION, preserving_proto_field_name=True,
+        notification,
+        KIND_NOTIFICATION,
+        preserving_proto_field_name=True,
     )
 
 
@@ -408,6 +412,57 @@ def objects_patch(bucket_name, object_name):
 def objects_delete(bucket_name, object_name):
     obj = gcs_object.Object.lookup(bucket_name, object_name, flask.request.args)
     obj.delete()
+    return ""
+
+
+@gcs.route("/b/<bucket_name>/o/<path:object_name>/acl")
+def objects_acl_list(bucket_name, object_name):
+    obj = gcs_object.Object.lookup(bucket_name, object_name, flask.request.args)
+    result = resources.ListObjectAccessControlsResponse(items=obj.metadata.acl)
+    return utils.message_to_rest(
+        result,
+        KIND_OBJECT_ACL + "s",
+        flask.request.args.get("fields", None),
+        len(result.items),
+    )
+
+
+@gcs.route("/b/<bucket_name>/o/<path:object_name>/acl", methods=["POST"])
+def objects_acl_create(bucket_name, object_name):
+    obj = gcs_object.Object.lookup(bucket_name, object_name, flask.request.args)
+    acl = obj.insert_acl(flask.request.data)
+    return utils.message_to_rest(acl, KIND_OBJECT_ACL)
+
+
+@gcs.route("/b/<bucket_name>/o/<path:object_name>/acl/<entity>")
+def objects_acl_get(bucket_name, object_name, entity):
+    obj = gcs_object.Object.lookup(bucket_name, object_name, flask.request.args)
+    acl, _ = obj.lookup_acl(entity)
+    return utils.message_to_rest(acl, KIND_OBJECT_ACL)
+
+
+@gcs.route("/b/<bucket_name>/o/<path:object_name>/acl/<entity>", methods=["PUT"])
+def objects_acl_update(bucket_name, object_name, entity):
+    obj = gcs_object.Object.lookup(bucket_name, object_name, flask.request.args)
+    role = json.loads(flask.request.data)["role"]
+    data = resources.ObjectAccessControl(entity=entity, role=role)
+    acl = obj.insert_acl(data, update=True)
+    return utils.message_to_rest(acl, KIND_OBJECT_ACL)
+
+
+@gcs.route("/b/<bucket_name>/o/<path:object_name>/acl/<entity>", methods=["PATCH"])
+def objects_acl_patch(bucket_name, object_name, entity):
+    obj = gcs_object.Object.lookup(bucket_name, object_name, flask.request.args)
+    role = json.loads(flask.request.data)["role"]
+    data = resources.ObjectAccessControl(entity=entity, role=role)
+    acl = obj.insert_acl(data, update=True)
+    return utils.message_to_rest(acl, KIND_OBJECT_ACL)
+
+
+@gcs.route("/b/<bucket_name>/o/<path:object_name>/acl/<entity>", methods=["DELETE"])
+def objects_acl_delete(bucket_name, object_name, entity):
+    obj = gcs_object.Object.lookup(bucket_name, object_name, flask.request.args)
+    obj.delete_acl(entity)
     return ""
 
 
@@ -535,7 +590,11 @@ application = DispatcherMiddleware(
 
 def rest_serve(port):
     serving.run_simple(
-        "localhost", int(port), application, use_reloader=False, threaded=True,
+        "localhost",
+        int(port),
+        application,
+        use_reloader=False,
+        threaded=True,
     )
 
 

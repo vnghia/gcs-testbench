@@ -121,18 +121,21 @@ class Bucket:
         self.insert_acl(make_acl_proto("project-editors-123456789", "OWNER"))
         self.insert_acl(make_acl_proto("project-viewers-123456789", "READER"))
 
-        def make_object_acl_proto(entity, role):
-            return resources.ObjectAccessControl(entity=entity, role=role)
-
         # TODO(vnvo2409): Check for predefinedDefaultObjectAcl
         self.insert_default_object_acl(
-            make_object_acl_proto("project-owners-123456789", "OWNER")
+            utils.make_object_acl_proto(
+                self.metadata.name, "project-owners-123456789", "OWNER"
+            )
         )
         self.insert_default_object_acl(
-            make_object_acl_proto("project-editors-123456789", "OWNER")
+            utils.make_object_acl_proto(
+                self.metadata.name, "project-editors-123456789", "OWNER"
+            )
         )
         self.insert_default_object_acl(
-            make_object_acl_proto("project-viewers-123456789", "READER")
+            utils.make_object_acl_proto(
+                self.metadata.name, "project-viewers-123456789", "READER"
+            )
         )
 
     def __init_iam_policy(self, context=None):
@@ -151,7 +154,9 @@ class Bucket:
                 utils.abort(500, "Invalid legacy role %s" % legacy_role, context)
             bindings.append(policy_pb2.Binding(role=role, members=[entry.entity]))
         self.iam_policy = policy_pb2.Policy(
-            version=1, bindings=bindings, etag=utils.compute_etag("__init_iam_policy"),
+            version=1,
+            bindings=bindings,
+            etag=utils.compute_etag("__init_iam_policy"),
         )
 
     def to_rest(self, request):
