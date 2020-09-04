@@ -283,6 +283,7 @@ def corrupt_media(media):
 GCS_BUCKETS = dict()
 GCS_OBJECTS = dict()
 GCS_UPLOADS = dict()
+GCS_REWRITES = dict()
 
 
 def insert_bucket(bucket):
@@ -357,12 +358,18 @@ def insert_object(bucket_name, obj):
 
 
 def check_object_generation(
-    bucket_name, object_name, args, current_generation="", context=None
+    bucket_name, object_name, args, current_generation="", source=False, context=None
 ):
     obj = lookup_object(bucket_name, object_name, current_generation, context=context)
     generation = obj.metadata.generation if obj is not None else 0
     generation_match = None
     generation_not_match = None
+    generation_match_field = (
+        "ifGenerationMatch" if not source else "ifSourceGenerationMatch"
+    )
+    generation_not_match_field = (
+        "ifGenerationNotMatch" if not source else "ifSourceGenerationNotMatch"
+    )
     if isinstance(args, Message):
         generation_match = (
             str(args.if_generation_match.value)
@@ -375,14 +382,20 @@ def check_object_generation(
             else None
         )
     elif args is not None:
-        generation_match = args.get("ifGenerationMatch", None)
-        generation_not_match = args.get("ifGenerationNotMatch", None)
+        generation_match = args.get(generation_match_field)
+        generation_not_match = args.get(generation_not_match_field)
     check_generation(
         generation, generation_match, generation_not_match, False, context=context
     )
     metageneration = obj.metadata.metageneration if obj is not None else None
     metageneration_match = None
     metageneration_not_match = None
+    metageneration_match_field = (
+        "ifMetagenerationMatch" if not source else "ifSourceMetagenerationMatch"
+    )
+    metageneration_not_match_field = (
+        "ifMetagenerationNotMatch" if not source else "ifSourceMetagenerationNotMatch"
+    )
     if isinstance(args, Message):
         metageneration_match = (
             str(args.if_metageneration_match.value)
@@ -395,8 +408,8 @@ def check_object_generation(
             else None
         )
     elif args is not None:
-        metageneration_match = args.get("ifMetagenerationMatch", None)
-        metageneration_not_match = args.get("ifMetagenerationNotMatch", None)
+        metageneration_match = args.get(metageneration_match_field)
+        metageneration_not_match = args.get(metageneration_not_match_field)
     check_generation(
         metageneration,
         metageneration_match,
@@ -426,3 +439,18 @@ def make_object_acl_proto(bucket_name, entity, role, object_name=""):
     return resources.ObjectAccessControl(
         bucket=bucket_name, entity=entity, role=role, object=object_name
     )
+
+
+# Rewrite
+
+
+def lookup_rewrite(rewrite_token):
+    return GCS_REWRITES.get(rewrite_token)
+
+
+def delete_rewrite(rewrite_token):
+    GCS_REWRITES.pop(rewrite_token, None)
+
+
+def insert_rewrite(rewrite):
+    GCS_REWRITES[rewrite.status.rewrite_token] = rewrite

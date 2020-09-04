@@ -32,6 +32,7 @@ from werkzeug.middleware.dispatcher import DispatcherMiddleware
 import gcs_bucket
 import gcs_object
 import gcs_project
+import gcs_rewrite
 import gcs_upload
 import storage_pb2 as storage
 import storage_pb2_grpc
@@ -392,6 +393,87 @@ def objects_list(bucket_name):
         flask.request.args.get("fields", None),
         len(result.items),
     )
+
+
+@gcs.route("/b/<bucket_name>/o/<path:object_name>/compose", methods=["POST"])
+def objects_compose(bucket_name, object_name):
+    payload = utils.process_data(flask.request.data)
+    source_objects = payload["sourceObjects"]
+    if source_objects is None:
+        utils.abort(400, "You must provide at least one source component.")
+    if len(source_objects) > 32:
+        utils.abort(
+            400,
+            "The number of source components provided"
+            " (%d) exceeds the maximum (32)" % len(source_objects),
+        )
+    composed_media = b""
+    for source_object in source_objects:
+        source_object_name = source_object.get("name")
+        if source_object_name is None:
+            utils.abort(400, "Required.")
+        generation = source_object.get("generation")
+        if_generation_match = (
+            source_object.get("objectPreconditions").get("ifGenerationMatch")
+            if source_object.get("objectPreconditions") is not None
+            else None
+        )
+        obj = gcs_object.Object.lookup(
+            bucket_name,
+            source_object_name,
+            {"generation": generation, "ifGenerationMatch": if_generation_match},
+        )
+        composed_media += obj.media
+    metadata = {"name": object_name, "bucket": bucket_name}
+    metadata.update(payload.get("destination", {}))
+    composed_object = gcs_object.Object(
+        metadata,
+        composed_media,
+        flask.request.args,
+        flask.request.headers,
+    )
+    return composed_object.to_rest(flask.request)
+
+
+@gcs.route(
+    "/b/<source_bucket>/o/<path:source_object>/copyTo/b/<destination_bucket>/o/<path:destination_object>",
+    methods=["POST"],
+)
+def objects_copy(source_bucket, source_object, destination_bucket, destination_object):
+    source_obj = gcs_object.Object.lookup(
+        source_bucket, source_object, flask.request.args, True
+    )
+    utils.check_object_generation(
+        destination_bucket, destination_object, flask.request.args
+    )
+    destination_metadata = source_obj.metadata
+    destination_metadata.bucket = destination_bucket
+    destination_metadata.name = destination_object
+    destination_obj = gcs_object.Object(
+        destination_metadata,
+        source_obj.media,
+        flask.request.args,
+        flask.request.headers,
+    )
+    destination_obj.update(flask.request.data)
+    return destination_obj.to_rest(flask.request)
+
+
+@gcs.route(
+    "/b/<source_bucket>/o/<path:source_object>/rewriteTo/b/<destination_bucket>/o/<path:destination_object>",
+    methods=["POST"],
+)
+def objects_rewrite(
+    source_bucket, source_object, destination_bucket, destination_object
+):
+    insert_test_bucket()
+    args = dict(flask.request.args)
+    args["sourceBucket"] = source_bucket
+    args["sourceObject"] = source_object
+    args["destinationBucket"] = destination_bucket
+    args["destinationObject"] = destination_object
+    flask.request.args = args
+    return gcs_rewrite.Rewrite.process_request(flask.request, context=None)
 
 
 @gcs.route("/b/<bucket_name>/o/<path:object_name>", methods=["PUT"])

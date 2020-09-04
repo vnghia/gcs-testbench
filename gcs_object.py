@@ -274,17 +274,18 @@ class Object:
             return cls.__insert_rest(bucket_name, request, xml_object_name)
 
     @classmethod
-    def lookup(cls, bucket_name, object_name, args=None, context=None):
+    def lookup(cls, bucket_name, object_name, args=None, source=False, context=None):
+        generation_field = "generation" if not source else "sourceGeneration"
         if isinstance(args, Message):
             current_generation = str(args.generation) if args.generation != 0 else ""
         else:
             current_generation = (
-                str(args.get("generation"))
-                if args is not None and args.get("generation") is not None
+                str(args.get(generation_field))
+                if args is not None and args.get(generation_field) is not None
                 else ""
             )
         obj = utils.check_object_generation(
-            bucket_name, object_name, args, current_generation, context=context
+            bucket_name, object_name, args, current_generation, source, context=context
         )
         if obj is None:
             utils.abort(404, "Object %s does not exist" % object_name, context)
@@ -333,7 +334,9 @@ class Object:
             if predefined_acl is None:
                 utils.abort(400, "Invalid predefinedAcl value %s" % acl)
         else:
-            predefined_acl = args.get("predefinedAcl")
+            predefined_acl = args.get(
+                "predefinedAcl", args.get("destinationPredefinedAcl")
+            )
         if predefined_acl is None:
             predefined_acl = "projectPrivate"
         owner_entity = "project-owners-123456789"
@@ -526,3 +529,6 @@ class Object:
         if "x_testbench_md5" in self.metadata.metadata:
             header += ",md5=" + str(self.metadata.md5_hash)
         return header if header != "" else None
+
+    def rewrite(self):
+        pass
