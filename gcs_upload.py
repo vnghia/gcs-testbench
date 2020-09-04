@@ -48,7 +48,8 @@ class Upload:
                 metadata["size"] = int(request.headers.get("x-upload-content-length"))
             if request.args.get("name") is not None and len(request.data):
                 utils.abort(
-                    400, "The name argument is only supported for empty payloads",
+                    400,
+                    "The name argument is only supported for empty payloads",
                 )
             if len(request.data):
                 metadata.update(json.loads(request.data))
@@ -101,9 +102,6 @@ class Upload:
         pass
 
     def __process_request_rest(self, request):
-        utils.check_object_generation(
-            self.metadata.bucket, self.metadata.name, self.args
-        )
         content_range = request.headers.get("content-range")
         content_length = request.headers.get("content-length")
         if content_range is not None:
@@ -122,7 +120,9 @@ class Upload:
                     self.complete = True
                     return
             if items[0] == "*":
-                return self.status_rest()
+                if self.complete:
+                    return self.metadata.name
+                return None
             else:
                 self.media += utils.extract_media(request)
                 self.committed_size = len(self.media)
@@ -136,4 +136,4 @@ class Upload:
         if isinstance(request, storage.InsertObjectRequest):
             self.__process_request_grpc(request)
         else:
-            self.__process_request_rest(request)
+            return self.__process_request_rest(request)

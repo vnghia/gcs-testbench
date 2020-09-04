@@ -488,8 +488,15 @@ def resumable_upload_chunk(bucket_name):
     if upload_id is None:
         utils.abort(400, "Missing upload_id in resumable_upload_chunk")
     upload = gcs_upload.Upload.lookup(upload_id)
-    upload.process_request(flask.request)
+    response = upload.process_request(flask.request)
+    if response is not None:
+        return gcs_object.Object.lookup(
+            bucket_name, response, flask.request.args
+        ).to_rest(flask.request)
     if upload.complete:
+        utils.check_object_generation(
+            upload.metadata.bucket, upload.metadata.name, upload.args
+        )
         obj = gcs_object.Object(upload.metadata, upload.media)
         obj.metadata.metadata["x_testbench_upload"] = "resumable"
         return obj.to_rest(flask.request, upload.args.get("fields"))

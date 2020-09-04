@@ -61,6 +61,7 @@ class Object:
         self.metadata.crc32c.value = crc32(self.media)
         self.metadata.time_created.FromDatetime(timestamp)
         self.metadata.updated.FromDatetime(timestamp)
+        self.__update_acl(args, headers)
         utils.insert_object(self.metadata.bucket, self)
 
     @classmethod
@@ -178,7 +179,7 @@ class Object:
                 )
             del metadata["crc32c"]
         metadata.update(utils.extract_encryption(request))
-        obj = Object(metadata, media)
+        obj = Object(metadata, media, request.args, request.headers)
         return obj
 
     @classmethod
@@ -223,7 +224,7 @@ class Object:
                             % (actual_crc32c, crc32c),
                         )
         utils.check_object_generation(bucket_name, object_name, args)
-        obj = Object(metadata, media)
+        obj = Object(metadata, media, request.args, request.headers)
         obj.metadata.metadata["x_testbench_upload"] = "xml"
         return obj
 
@@ -250,6 +251,8 @@ class Object:
             obj = Object(
                 {"bucket": bucket_name, "name": object_name},
                 media,
+                request.args,
+                request.headers,
             )
             obj.metadata.metadata["x_testbench_upload"] = "simple"
             return obj
@@ -261,7 +264,10 @@ class Object:
         pass
 
     @classmethod
-    def insert(cls, bucket_name, request, xml_object_name=None):
+    def insert(cls, bucket_name, request, xml_object_name=None, context=None):
+        bucket = utils.lookup_bucket(bucket_name)
+        if bucket is None:
+            utils.abort(404, "Bucket %s does not exist", context)
         if isinstance(request, storage.InsertObjectRequest):
             return cls.__insert_grpc(bucket_name, request)
         else:
@@ -338,6 +344,14 @@ class Object:
                 "OWNER",
                 self.metadata.name,
             )
+        )
+        self.metadata.owner.entity = "project-owners-123456789"
+        self.metadata.owner.entity_id = (
+            self.metadata.bucket
+            + "/"
+            + self.metadata.name
+            + "/"
+            + "project-owners-123456789"
         )
         acl = None
         if predefined_acl == "authenticatedRead":

@@ -36,6 +36,10 @@ class Bucket:
                 )
             self.metadata = ParseDict(metadata, resources.Bucket())
         self.metadata.id = self.metadata.name
+        self.metadata.owner.entity = "project-owners-123456789"
+        self.metadata.owner.entity_id = (
+            self.metadata.name + "/" + "project-owners-123456789"
+        )
         self.notification = []
         self.iam_policy = None
         self.__init_acl()
