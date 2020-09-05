@@ -13,8 +13,8 @@
 # limitations under the License.
 
 import base64
-import json
 import hashlib
+import json
 import re
 import struct
 from datetime import timezone
@@ -25,7 +25,7 @@ import grpc
 from crc32c import crc32
 from dateutil.parser import parse
 from flatdict import FlatterDict
-from google.protobuf.json_format import MessageToDict, ParseDict
+from google.protobuf.json_format import MessageToDict
 from google.protobuf.message import Message
 
 import storage_resources_pb2 as resources

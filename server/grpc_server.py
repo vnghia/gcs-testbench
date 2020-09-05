@@ -17,13 +17,11 @@ from concurrent import futures
 import grpc
 from google.protobuf.empty_pb2 import Empty
 
-import gcs_bucket
-import gcs_object
-import gcs_upload
 import storage_pb2 as storage
 import storage_pb2_grpc
 import storage_resources_pb2 as resources
 import utils
+from common import gcs_bucket, gcs_object, gcs_upload
 
 server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
 

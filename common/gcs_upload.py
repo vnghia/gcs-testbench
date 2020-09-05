@@ -16,7 +16,7 @@ import json
 import re
 
 import flask
-from google.protobuf.json_format import MessageToDict, Parse, ParseDict
+from google.protobuf.json_format import ParseDict
 
 import storage_pb2 as storage
 import storage_resources_pb2 as resources
@@ -103,7 +103,7 @@ class Upload:
 
     def __process_request_rest(self, request):
         content_range = request.headers.get("content-range")
-        content_length = request.headers.get("content-length")
+        # content_length = request.headers.get("content-length")
         if content_range is not None:
             items = list(content_range_split.match(content_range).groups())
             if len(items) != 2 or (items[0] == items[1] and items[0] != "*"):

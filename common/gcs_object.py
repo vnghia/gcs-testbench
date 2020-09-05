@@ -14,17 +14,15 @@
 
 import json
 import random
-import re
 import time
 from datetime import datetime, timezone
 
 import flask
+import gcs_upload
 from crc32c import crc32
-from google.iam.v1 import policy_pb2
-from google.protobuf.json_format import MessageToDict, Parse, ParseDict
+from google.protobuf.json_format import ParseDict
 from google.protobuf.message import Message
 
-import gcs_upload
 import storage_pb2 as storage
 import storage_resources_pb2 as resources
 import utils
@@ -201,8 +199,6 @@ class Object:
                 "x-goog-if-meta-generation-match"
             ]
         goog_hash = request.headers.get("x-goog-hash")
-        md5hash = None
-        crc32c = None
         if goog_hash is not None:
             for hash in goog_hash.split(","):
                 if hash.startswith("md5="):

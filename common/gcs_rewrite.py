@@ -12,14 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import json
 import gcs_object
-
-import flask
-from google.protobuf.json_format import MessageToDict, Parse, ParseDict
+from google.protobuf.json_format import ParseDict
 
 import storage_pb2 as storage
-import storage_resources_pb2 as resources
 import utils
 
 
@@ -77,7 +73,7 @@ class Rewrite:
         )
         rewrite.status.object_size = len(source.media)
         rewrite.media += source.media[
-            rewrite.status.total_bytes_rewritten : total_bytes_rewritten
+            (rewrite.status.total_bytes_rewritten) : total_bytes_rewritten
         ]
         rewrite.status.total_bytes_rewritten = len(rewrite.media)
         if total_bytes_rewritten == len(source.media):

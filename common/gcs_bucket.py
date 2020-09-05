@@ -13,9 +13,9 @@
 # limitations under the License.
 
 import json
+import os
 import random
 import re
-import os
 
 from google.iam.v1 import policy_pb2
 from google.protobuf.json_format import ParseDict

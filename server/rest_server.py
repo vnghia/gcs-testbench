@@ -20,14 +20,16 @@ import httpbin
 from werkzeug import serving
 from werkzeug.middleware.dispatcher import DispatcherMiddleware
 
-import gcs_bucket
-import gcs_object
-import gcs_project
-import gcs_rewrite
-import gcs_upload
 import storage_resources_pb2 as resources
 import utils
-from common import constant
+from common import (
+    constant,
+    gcs_bucket,
+    gcs_object,
+    gcs_project,
+    gcs_rewrite,
+    gcs_upload,
+)
 
 # Default handler for the test bench.
 root = flask.Flask(__name__)

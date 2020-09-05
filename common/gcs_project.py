@@ -14,10 +14,12 @@
 """Implement a class to simulate projects (service accounts and HMAC keys)."""
 
 import base64
-import flask
 import json
 import random
 import time
+
+import flask
+
 import utils
 
 
