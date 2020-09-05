@@ -15,6 +15,7 @@
 import base64
 import hashlib
 import json
+import os
 import re
 import struct
 from datetime import timezone
@@ -28,7 +29,9 @@ from flatdict import FlatterDict
 from google.protobuf.json_format import MessageToDict
 from google.protobuf.message import Message
 
+import storage_pb2 as storage
 import storage_resources_pb2 as resources
+from common import error, gcs_bucket, gcs_generation
 
 # regex
 remove_index = re.compile(r":[0-9]+|^[0-9]+")
@@ -291,11 +294,33 @@ def insert_bucket(bucket):
     GCS_OBJECTS[bucket.metadata.name] = dict()
 
 
-def lookup_bucket(bucket_name):
-    return GCS_BUCKETS.get(bucket_name, None)
+def insert_test_bucket():
+    bucket_name = os.environ.get(
+        "GOOGLE_CLOUD_CPP_STORAGE_TEST_BUCKET_NAME", "test-bucket"
+    )
+    if search_bucket(bucket_name) is None:
+        request = storage.InsertBucketRequest(bucket={"name": bucket_name})
+        bucket_test = gcs_bucket.Bucket(request, "")
+        bucket_test.metadata.metageneration = 4
+        bucket_test.metadata.versioning.enabled = True
+        insert_bucket(bucket_test)
 
 
-def all_buckets():
+def get_bucket(bucket_name, request, context):
+    bucket = search_bucket(bucket_name)
+    if bucket is None:
+        error.abort(404, "Bucket %s does not exist." % bucket_name, context)
+    gcs_generation.check_bucket_metageneration(bucket, request, context)
+    return bucket
+
+
+def search_bucket(bucket_name):
+    return GCS_BUCKETS.get(bucket_name)
+
+
+def list_bucket(project, context):
+    if project is None or project.endswith("-"):
+        error.abort(412, "Invalid or missing project id in `Buckets: list`", context)
     return GCS_BUCKETS.items()
 
 

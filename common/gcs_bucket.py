@@ -12,18 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os
 import random
 import re
 
 from google.iam.v1 import policy_pb2
 from google.protobuf.json_format import ParseDict
-from google.protobuf.message import Message
 
-import storage_pb2 as storage
 import storage_resources_pb2 as resources
-import utils
-from common import error, gcs_acl
+from common import error, gcs_acl, hash_utils, process
 
 
 class Bucket:
@@ -35,7 +31,7 @@ class Bucket:
             predefined_acl = request.predefined_acl
             predefined_default_object_acl = request.predefined_default_object_acl
         else:
-            metadata = utils.process_data(request.data)
+            metadata = process.process_data(request.data)
             self.metadata = ParseDict(metadata, resources.Bucket())
             predefined_acl = request.args.get("predefinedAcl", "")
             predefined_default_object_acl = request.args.get(
@@ -67,15 +63,6 @@ class Bucket:
         self.iam_policy = None
         self.notification = []
         self.__init_iam_policy(context)
-        utils.insert_bucket(self)
-
-    @classmethod
-    def list(cls, project, context=None):
-        if project is None or project.endswith("-"):
-            utils.abort(
-                412, "Invalid or missing project id in `Buckets: list`", context
-            )
-        return utils.all_buckets()
 
     @classmethod
     def __validate_bucket_name(cls, bucket_name):
@@ -97,47 +84,6 @@ class Bucket:
                 is None
             )
         return valid
-
-    @classmethod
-    def lookup(cls, bucket_name, args=None, context=None):
-        bucket = utils.lookup_bucket(bucket_name)
-        if bucket is None:
-            utils.abort(404, "Bucket %s does not exist" % bucket_name, context)
-        metageneration = str(bucket.metadata.metageneration)
-        metageneration_match = None
-        metageneration_not_match = None
-        if isinstance(args, Message):
-            metageneration_match = (
-                str(args.if_metageneration_match.value)
-                if args.HasField("if_metageneration_match")
-                else None
-            )
-            metageneration_not_match = (
-                str(args.if_metageneration_not_match.value)
-                if args.HasField("if_metageneration_not_match")
-                else None
-            )
-        elif args is not None:
-            metageneration_match = args.get("ifMetagenerationMatch", None)
-            metageneration_not_match = args.get("ifMetagenerationNotMatch", None)
-        if (
-            metageneration_not_match is not None
-            and metageneration_not_match == metageneration
-        ):
-            utils.abort(
-                412,
-                "Precondition Failed (metageneration = %s vs metageneration_not_match = %s)"
-                % (metageneration, metageneration_not_match),
-                context,
-            )
-        if metageneration_match is not None and metageneration_match != metageneration:
-            utils.abort(
-                412,
-                "Precondition Failed (metageneration = %s vs metageneration_match = %s)"
-                % (metageneration, metageneration_match),
-                context,
-            )
-        return bucket
 
     def __init_predefined_acl(self, predefined_acl, context):
         protobuf2rest = [
@@ -184,15 +130,15 @@ class Bucket:
         for entry in self.metadata.acl:
             legacy_role = entry.role
             if legacy_role is None or entry.entity is None:
-                utils.abort(500, "Invalid ACL entry", context)
+                error.abort(500, "Invalid ACL entry", context)
             role = role_mapping.get(legacy_role)
             if role is None:
-                utils.abort(500, "Invalid legacy role %s" % legacy_role, context)
+                error.abort(500, "Invalid legacy role %s" % legacy_role, context)
             bindings.append(policy_pb2.Binding(role=role, members=[entry.entity]))
         self.iam_policy = policy_pb2.Policy(
             version=1,
             bindings=bindings,
-            etag=utils.compute_etag("__init_iam_policy"),
+            etag=hash_utils.random_bytes("__init_iam_policy"),
         )
 
     def to_rest(self, request):
@@ -200,7 +146,7 @@ class Bucket:
         if b"acl" in request.data or b"defaultObjectAcl" in request.data:
             projection = "full"
         projection = request.args.get("projection", projection)
-        result = utils.message_to_rest(
+        result = process.message_to_rest(
             self.metadata, "storage#bucket", request.args.get("fields", None)
         )
         if projection == "noAcl":
@@ -214,20 +160,17 @@ class Bucket:
         if isinstance(data, resources.Bucket):
             self.metadata.MergeFrom(data)
         else:
-            self.metadata = ParseDict(utils.process_data(data), self.metadata)
+            self.metadata = ParseDict(process.process_data(data), self.metadata)
         if self.metadata.versioning.enabled:
             self.metadata.metageneration = metageneration + 1
-
-    def delete(self):
-        utils.delete_bucket(self.metadata.name)
 
     def insert_acl(self, data, update=False):
         acl = (
             data
             if isinstance(data, resources.BucketAccessControl)
-            else ParseDict(utils.process_data(data), resources.BucketAccessControl())
+            else ParseDict(process.process_data(data), resources.BucketAccessControl())
         )
-        acl.etag = utils.random_etag(acl.entity + acl.role)
+        acl.etag = hash_utils.random_bytes(acl.entity + acl.role)
         acl.id = self.metadata.name + "/" + acl.entity
         acl.bucket = self.metadata.name
         if update:
@@ -242,7 +185,7 @@ class Bucket:
         for i in range(len(self.metadata.acl)):
             if self.metadata.acl[i].entity == entity:
                 return self.metadata.acl[i], i
-        utils.abort(404, "Acl %s does not exist" % entity)
+        error.abort(404, "Acl %s does not exist" % entity)
 
     def delete_acl(self, entity):
         _, index = self.lookup_acl(entity)
@@ -252,9 +195,9 @@ class Bucket:
         acl = (
             data
             if isinstance(data, resources.ObjectAccessControl)
-            else ParseDict(utils.process_data(data), resources.ObjectAccessControl())
+            else ParseDict(process.process_data(data), resources.ObjectAccessControl())
         )
-        acl.etag = utils.random_etag(acl.entity + acl.role)
+        acl.etag = hash_utils.random_bytes(acl.entity + acl.role)
         acl.id = self.metadata.name + "/" + acl.entity
         acl.bucket = self.metadata.name
         if update:
@@ -269,7 +212,7 @@ class Bucket:
         for i in range(len(self.metadata.default_object_acl)):
             if self.metadata.default_object_acl[i].entity == entity:
                 return self.metadata.default_object_acl[i], i
-        utils.abort(404, "Acl %s does not exist" % entity)
+        error.abort(404, "Acl %s does not exist" % entity)
 
     def delete_default_object_acl(self, entity):
         _, index = self.lookup_default_object_acl(entity)
@@ -279,7 +222,7 @@ class Bucket:
         noti = (
             data
             if isinstance(data, resources.Notification)
-            else ParseDict(utils.process_data(data), resources.Notification())
+            else ParseDict(process.process_data(data), resources.Notification())
         )
         noti.id = "notification-%s" % str(random.random())
         self.notification.append(noti)
@@ -293,25 +236,14 @@ class Bucket:
         for i in range(len(self.notification)):
             if self.notification[i].id == notification_id:
                 return self.notification[i], i
-        utils.abort(404, "Notification %s does not exist" % notification_id)
+        error.abort(404, "Notification %s does not exist" % notification_id)
 
     def insert_iam_policy(self, data):
         policy = (
             data
             if isinstance(data, policy_pb2.Policy)
-            else ParseDict(utils.process_data(data), policy_pb2.Policy())
+            else ParseDict(process.process_data(data), policy_pb2.Policy())
         )
         self.iam_policy.CopyFrom(policy)
-        self.iam_policy.etag = utils.random_etag("iam_policy")
+        self.iam_policy.etag = hash_utils.random_bytes("iam_policy")
         return self.iam_policy
-
-    @classmethod
-    def insert_test_bucket(cls):
-        bucket_name = os.environ.get(
-            "GOOGLE_CLOUD_CPP_STORAGE_TEST_BUCKET_NAME", "test-bucket"
-        )
-        if utils.lookup_bucket(bucket_name) is None:
-            request = storage.InsertBucketRequest(bucket={"name": bucket_name})
-            bucket_test = Bucket(request, "")
-            bucket_test.metadata.metageneration = 4
-            bucket_test.metadata.versioning.enabled = True

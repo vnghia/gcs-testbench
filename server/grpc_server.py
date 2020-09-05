@@ -28,30 +28,31 @@ server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
 
 class StorageServicer(storage_pb2_grpc.StorageServicer):
     def InsertBucket(self, request, context):
-        gcs_bucket.Bucket.insert_test_bucket()
+        utils.insert_test_bucket()
         bucket = gcs_bucket.Bucket(request, context)
+        utils.insert_bucket(bucket)
         return bucket.metadata
 
     def ListBuckets(self, request, context):
-        gcs_bucket.Bucket.insert_test_bucket()
+        utils.insert_test_bucket()
         result = resources.ListBucketsResponse(next_page_token="", items=[])
-        for name, b in gcs_bucket.Bucket.list(request.project, context=context):
+        for name, b in utils.list_bucket(request.project, context=context):
             result.items.append(b.metadata)
         return result
 
     def GetBucket(self, request, context):
         bucket_name = request.bucket
-        bucket = gcs_bucket.Bucket.lookup(bucket_name, request, context=context)
+        bucket = utils.get_bucket(bucket_name, request, context)
         return bucket.metadata
 
     def DeleteBucket(self, request, context):
         bucket_name = request.bucket
-        bucket = gcs_bucket.Bucket.lookup(bucket_name, request, context=context)
-        bucket.delete()
+        _ = utils.get_bucket(bucket_name, request, context)
+        utils.delete_bucket(bucket_name)
         return Empty()
 
     def InsertObject(self, request_iterator, context):
-        gcs_bucket.Bucket.insert_test_bucket()
+        utils.insert_test_bucket()
         upload = None
         for request in request_iterator:
             first_message = request.WhichOneof("first_message")
