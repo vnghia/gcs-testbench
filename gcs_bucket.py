@@ -15,9 +15,10 @@
 import json
 import random
 import re
+import os
 
 from google.iam.v1 import policy_pb2
-from google.protobuf.json_format import MessageToDict, ParseDict
+from google.protobuf.json_format import ParseDict
 from google.protobuf.message import Message
 
 import storage_resources_pb2 as resources
@@ -272,3 +273,13 @@ class Bucket:
         self.iam_policy.CopyFrom(policy)
         self.iam_policy.etag = utils.random_etag("iam_policy")
         return self.iam_policy
+
+    @classmethod
+    def insert_test_bucket(cls):
+        bucket_name = os.environ.get(
+            "GOOGLE_CLOUD_CPP_STORAGE_TEST_BUCKET_NAME", "test-bucket"
+        )
+        if utils.lookup_bucket(bucket_name) is None:
+            bucket_test = Bucket(json.dumps({"name": bucket_name}))
+            bucket_test.metadata.metageneration = 4
+            bucket_test.metadata.versioning.enabled = True
