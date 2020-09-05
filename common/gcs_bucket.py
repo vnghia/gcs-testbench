@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import random
+import json
 import re
 
 from google.iam.v1 import policy_pb2
@@ -34,9 +34,10 @@ class Bucket:
         self.metadata.owner.entity = gcs_acl.project_entity("owners")
         self.metadata.owner.entity_id = gcs_acl.entity_id(self.metadata.owner.entity)
         self.__update_predefined_acl_and_doacl(request, context)
-        self.iam_policy = None
-        self.notification = []
         self.__init_iam_policy(context)
+        self.notifications = []
+
+    # Utils
 
     def __validate_bucket_name(self, context):
         valid = True
@@ -70,6 +71,36 @@ class Bucket:
             predefined_default_object_acl, context
         )
 
+    # Bucket operations
+
+    def __update(self, request, update_mask, context):
+        metadata = (
+            request.metadata
+            if context is not None
+            else ParseDict(process.process_data(request.data), self.metadata)
+        )
+        if context is not None:
+            if update_mask is not None:
+                update_mask.MergeMessage(metadata, self.metadata)
+            else:
+                self.metadata.MergeFrom(metadata)
+        self.__update_predefined_acl_and_doacl(request, context)
+        if self.metadata.versioning.enabled:
+            self.metadata.metageneration += 1
+
+    def patch(self, request, context):
+        update_mask = None
+        if context is not None:
+            update_mask = (
+                request.update_mask if request.HasField("update_mask") else None
+            )
+        self.__update(request, update_mask, context)
+
+    def update(self, request, context):
+        self.__update(request, None, context)
+
+    # ACL
+
     def __update_predefined_acl(self, predefined_acl, context):
         protobuf2rest = [
             "",
@@ -91,6 +122,76 @@ class Bucket:
         bucket = self.metadata.name
         acls = gcs_acl.bucket_predefined_acls(bucket, predefined_acl, context)
         self.metadata.acl.extend(acls)
+
+    def __search_acl(self, entity):
+        for i in range(len(self.metadata.acl)):
+            if self.metadata.acl[i].entity == entity:
+                return i
+
+    def __get_index_acl(self, entity, context):
+        index = self.__search_acl(entity)
+        if index is None:
+            error.abort(404, "Acl %s does not exist" % entity, context)
+        return index
+
+    def get_acl(self, entity, context):
+        index = self.__get_index_acl(entity, context)
+        return self.metadata.acl[index]
+
+    def insert_acl(self, request, context):
+        if self.metadata.iam_configuration.uniform_bucket_level_access.enabled:
+            error.abort(400, "Bad Requests: Insert ACL is not allowed.", context)
+        acl = None
+        if context is None:
+            payload = json.loads(request.data)
+            acl = gcs_acl.bucket_entity_acl(
+                self.metadata.name, payload["entity"], payload["role"], context
+            )
+        else:
+            acl = request.bucket_access_control
+            acl = gcs_acl.bucket_entity_acl(
+                self.metadata.name,
+                request.bucket_access_control.entity,
+                request.bucket_access_control.role,
+                context,
+            )
+        self.metadata.acl.append(acl)
+        return acl
+
+    def __update_acl(self, entity, request, update_mask, context):
+        if self.metadata.iam_configuration.uniform_bucket_level_access.enabled:
+            error.abort(400, "Bad Requests: Update/Patch ACL is not allowed.", context)
+        index = self.__get_index_acl(entity, context)
+        acl = (
+            request.bucket_access_control
+            if context is not None
+            else ParseDict(process.process_data(request.data), self.metadata.acl[index])
+        )
+        if context is not None:
+            if update_mask is not None:
+                update_mask.MergeMessage(acl, self.metadata.acl[index])
+            else:
+                self.metadata.acl[index].MergeFrom(acl)
+        return self.metadata.acl[index]
+
+    def update_acl(self, entity, request, context):
+        return self.__update_acl(entity, request, None, context)
+
+    def patch_acl(self, entity, request, context):
+        update_mask = None
+        if context is not None:
+            update_mask = (
+                request.update_mask if request.HasField("update_mask") else None
+            )
+        return self.__update_acl(entity, request, update_mask, context)
+
+    def delete_acl(self, entity, context):
+        index = self.__search_acl(entity)
+        if index is None:
+            error.abort(404, "Acl %s does not exist" % entity, context)
+        del self.metadata.acl[index]
+
+    # Default Object ACL
 
     def __update_predefined_default_object_acl(
         self, predefined_default_object_acl, context
@@ -121,7 +222,118 @@ class Bucket:
         )
         self.metadata.default_object_acl.extend(acls)
 
-    def __init_iam_policy(self, context=None):
+    def __search_default_object_acl(self, entity):
+        for i in range(len(self.metadata.default_object_acl)):
+            if self.metadata.default_object_acl[i].entity == entity:
+                return i
+
+    def __get_index_default_object_acl(self, entity, context):
+        index = self.__search_default_object_acl(entity)
+        if index is None:
+            error.abort(404, "Default Object Acl %s does not exist" % entity, context)
+        return index
+
+    def get_default_object_acl(self, entity, context):
+        index = self.__get_index_default_object_acl(entity, context)
+        return self.metadata.default_object_acl[index]
+
+    def insert_default_object_acl(self, request, context):
+        if self.metadata.iam_configuration.uniform_bucket_level_access.enabled:
+            error.abort(
+                400, "Bad Requests: Insert Default Object ACL is not allowed.", context
+            )
+        acl = None
+        if context is None:
+            payload = json.loads(request.data)
+            acl = gcs_acl.bucket_entity_default_object_acl(
+                self.metadata.name, payload["entity"], payload["role"], context
+            )
+        else:
+            acl = gcs_acl.bucket_entity_default_object_acl(
+                self.metadata.name,
+                request.object_access_control.entity,
+                request.object_access_control.role,
+                context,
+            )
+        self.metadata.default_object_acl.append(acl)
+        return acl
+
+    def __update_default_object_acl(self, entity, request, update_mask, context):
+        if self.metadata.iam_configuration.uniform_bucket_level_access.enabled:
+            error.abort(
+                400,
+                "Bad Requests: Update/Patch Default Object ACL is not allowed.",
+                context,
+            )
+        index = self.__get_index_default_object_acl(entity, context)
+        acl = (
+            request.object_access_control
+            if context is not None
+            else ParseDict(
+                process.process_data(request.data),
+                self.metadata.default_object_acl[index],
+            )
+        )
+        if context is not None:
+            if update_mask is not None:
+                update_mask.MergeMessage(acl, self.metadata.default_object_acl[index])
+            else:
+                self.metadata.default_object_acl[index].MergeFrom(acl)
+        return self.metadata.default_object_acl[index]
+
+    def update_default_object_acl(self, entity, request, context):
+        return self.__update_default_object_acl(entity, request, None, context)
+
+    def patch_default_object_acl(self, entity, request, context):
+        update_mask = None
+        if context is not None:
+            update_mask = (
+                request.update_mask if request.HasField("update_mask") else None
+            )
+        return self.__update_default_object_acl(entity, request, update_mask, context)
+
+    def delete_default_object_acl(self, entity, context):
+        index = self.__search_default_object_acl(entity)
+        if index is None:
+            error.abort(404, "Default Object Acl %s does not exist" % entity, context)
+        del self.metadata.default_object_acl[index]
+
+    # Notification
+
+    def __get_notification(self, notification_id):
+        for i in range(len(self.notifications)):
+            if self.notifications[i].id == notification_id:
+                return i
+
+    def __get_index_notification(self, notification_id, context):
+        index = self.__get_notification(notification_id)
+        if index is None:
+            error.abort(
+                404, "Notification %s does not exist" % notification_id, context
+            )
+        return index
+
+    def insert_notification(self, request, context):
+        notification = (
+            request.notification
+            if context is not None
+            else ParseDict(process.process_data(request.data), resources.Notification())
+        )
+        notification.id = hash_utils.random_str("notification-")
+        self.notifications.append(notification)
+        return notification
+
+    def get_notification(self, notification_id, context):
+        index = self.__get_index_notification(notification_id, context)
+        return self.notifications[index]
+
+    def delete_notification(self, notification_id, context):
+        index = self.__get_index_notification(notification_id, context)
+        del self.notifications[index]
+
+    # IAM Policy
+
+    def __init_iam_policy(self, context):
         role_mapping = {
             "READER": "roles/storage.legacyBucketReader",
             "WRITER": "roles/storage.legacyBucketWriter",
@@ -139,8 +351,20 @@ class Bucket:
         self.iam_policy = policy_pb2.Policy(
             version=1,
             bindings=bindings,
-            etag=hash_utils.random_bytes("__init_iam_policy"),
+            etag=hash_utils.random_bytes("iam_policy"),
         )
+
+    def set_iam_policy(self, request, context):
+        policy = (
+            request.iam_request.policy
+            if context is not None
+            else ParseDict(process.process_data(request.data), policy_pb2.Policy())
+        )
+        self.iam_policy = policy
+        self.iam_policy.etag = hash_utils.random_bytes("iam_policy")
+        return self.iam_policy
+
+    # Reponse
 
     def to_rest(self, request):
         projection = "noAcl"
@@ -155,113 +379,3 @@ class Bucket:
             result.pop("defaultObjectAcl", None)
             result.pop("owner", None)
         return result
-
-    def __update(self, request, update_mask, context):
-        metadata = (
-            request.metadata
-            if context is not None
-            else ParseDict(process.process_data(request.data), self.metadata)
-        )
-        if context is not None:
-            if update_mask is not None:
-                update_mask.MergeMessage(metadata, self.metadata)
-            else:
-                self.metadata.MergeFrom(metadata)
-        self.__update_predefined_acl_and_doacl(request, context)
-        if self.metadata.versioning.enabled:
-            self.metadata.metageneration += 1
-
-    def patch(self, request, context):
-        update_mask = None
-        if context is not None:
-            update_mask = (
-                request.update_mask if request.HasField("update_mask") else None
-            )
-        self.__update(request, update_mask, context)
-
-    def update(self, request, context):
-        self.__update(request, None, context)
-
-    def insert_acl(self, data, update=False):
-        acl = (
-            data
-            if isinstance(data, resources.BucketAccessControl)
-            else ParseDict(process.process_data(data), resources.BucketAccessControl())
-        )
-        acl.etag = hash_utils.random_bytes(acl.entity + acl.role)
-        acl.id = self.metadata.name + "/" + acl.entity
-        acl.bucket = self.metadata.name
-        if update:
-            _, index = self.lookup_acl(acl.entity)
-            self.metadata.acl[index].MergeFrom(acl)
-            return self.metadata.acl[index]
-        else:
-            self.metadata.acl.append(acl)
-            return acl
-
-    def lookup_acl(self, entity):
-        for i in range(len(self.metadata.acl)):
-            if self.metadata.acl[i].entity == entity:
-                return self.metadata.acl[i], i
-        error.abort(404, "Acl %s does not exist" % entity)
-
-    def delete_acl(self, entity):
-        _, index = self.lookup_acl(entity)
-        del self.metadata.acl[index]
-
-    def insert_default_object_acl(self, data, update=False):
-        acl = (
-            data
-            if isinstance(data, resources.ObjectAccessControl)
-            else ParseDict(process.process_data(data), resources.ObjectAccessControl())
-        )
-        acl.etag = hash_utils.random_bytes(acl.entity + acl.role)
-        acl.id = self.metadata.name + "/" + acl.entity
-        acl.bucket = self.metadata.name
-        if update:
-            _, index = self.lookup_default_object_acl(acl.entity)
-            self.metadata.default_object_acl[index].MergeFrom(acl)
-            return self.metadata.default_object_acl[index]
-        else:
-            self.metadata.default_object_acl.append(acl)
-            return acl
-
-    def lookup_default_object_acl(self, entity):
-        for i in range(len(self.metadata.default_object_acl)):
-            if self.metadata.default_object_acl[i].entity == entity:
-                return self.metadata.default_object_acl[i], i
-        error.abort(404, "Acl %s does not exist" % entity)
-
-    def delete_default_object_acl(self, entity):
-        _, index = self.lookup_default_object_acl(entity)
-        del self.metadata.default_object_acl[index]
-
-    def insert_notification(self, data):
-        noti = (
-            data
-            if isinstance(data, resources.Notification)
-            else ParseDict(process.process_data(data), resources.Notification())
-        )
-        noti.id = "notification-%s" % str(random.random())
-        self.notification.append(noti)
-        return noti
-
-    def delete_notification(self, notification_id):
-        _, index = self.lookup_notification(notification_id)
-        del self.notification[index]
-
-    def lookup_notification(self, notification_id):
-        for i in range(len(self.notification)):
-            if self.notification[i].id == notification_id:
-                return self.notification[i], i
-        error.abort(404, "Notification %s does not exist" % notification_id)
-
-    def insert_iam_policy(self, data):
-        policy = (
-            data
-            if isinstance(data, policy_pb2.Policy)
-            else ParseDict(process.process_data(data), policy_pb2.Policy())
-        )
-        self.iam_policy.CopyFrom(policy)
-        self.iam_policy.etag = hash_utils.random_bytes("iam_policy")
-        return self.iam_policy
