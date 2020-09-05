@@ -81,14 +81,14 @@ def buckets_get(bucket_name):
 def buckets_update(bucket_name):
     utils.insert_test_bucket()
     bucket = utils.get_bucket(bucket_name, flask.request, None)
-    bucket.update(flask.request.data)
+    bucket.update(flask.request, None)
     return bucket.to_rest(flask.request)
 
 
 @gcs.route("/b/<bucket_name>", methods=["PATCH"])
 def buckets_patch(bucket_name):
     bucket = utils.get_bucket(bucket_name, flask.request, None)
-    bucket.update(flask.request.data)
+    bucket.patch(flask.request, None)
     return bucket.to_rest(flask.request)
 
 

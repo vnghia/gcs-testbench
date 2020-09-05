@@ -19,6 +19,26 @@ from common import error
 
 PROJECT_ID = os.getenv("GOOGLE_CLOUD_CPP_STORAGE_TEST_PROJECT_ID", "123456789")
 
+
+# Extract
+
+
+def extract_predefined_acl(request, context):
+    return (
+        request.args.get("predefinedAcl", "")
+        if context is None
+        else request.predefined_acl
+    )
+
+
+def extract_predefined_default_object_acl(request, context):
+    return (
+        request.args.get("predefinedDefaultObjectAcl", "")
+        if context is None
+        else request.predefined_default_object_acl
+    )
+
+
 # Entity
 
 

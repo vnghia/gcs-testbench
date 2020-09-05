@@ -261,7 +261,7 @@ class Object:
 
     @classmethod
     def insert(cls, bucket_name, request, xml_object_name=None, context=None):
-        bucket = utils.lookup_bucket(bucket_name)
+        bucket = utils.search_bucket(bucket_name)
         if bucket is None:
             utils.abort(404, "Bucket %s does not exist", context)
         if isinstance(request, storage.InsertObjectRequest):
@@ -441,7 +441,7 @@ class Object:
             for key, value in self.metadata.metadata.items()
             if key.startswith("x_testbench_")
         }
-        versioning = utils.lookup_bucket(
+        versioning = utils.search_bucket(
             self.metadata.bucket
         ).metadata.versioning.enabled
         if isinstance(data, resources.Object):
