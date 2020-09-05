@@ -18,7 +18,6 @@ import time
 from datetime import datetime, timezone
 
 import flask
-import gcs_upload
 from crc32c import crc32
 from google.protobuf.json_format import ParseDict
 from google.protobuf.message import Message
@@ -26,6 +25,7 @@ from google.protobuf.message import Message
 import storage_pb2 as storage
 import storage_resources_pb2 as resources
 import utils
+from common import gcs_upload
 
 
 class Object:

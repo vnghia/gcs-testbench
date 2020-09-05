@@ -12,11 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import gcs_object
 from google.protobuf.json_format import ParseDict
 
 import storage_pb2 as storage
 import utils
+from common import gcs_object
 
 
 class Rewrite:

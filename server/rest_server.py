@@ -22,14 +22,8 @@ from werkzeug.middleware.dispatcher import DispatcherMiddleware
 
 import storage_resources_pb2 as resources
 import utils
-from common import (
-    constant,
-    gcs_bucket,
-    gcs_object,
-    gcs_project,
-    gcs_rewrite,
-    gcs_upload,
-)
+from common import (constant, gcs_bucket, gcs_object, gcs_project, gcs_rewrite,
+                    gcs_upload)
 
 # Default handler for the test bench.
 root = flask.Flask(__name__)
@@ -65,7 +59,7 @@ def buckets_list():
 @gcs.route("/b", methods=["POST"])
 def buckets_insert():
     gcs_bucket.Bucket.insert_test_bucket()
-    bucket = gcs_bucket.Bucket(flask.request.data)
+    bucket = gcs_bucket.Bucket(flask.request, None)
     return bucket.to_rest(flask.request)
 
 

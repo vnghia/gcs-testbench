@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import json
 import os
 import random
 import re
@@ -21,29 +20,52 @@ from google.iam.v1 import policy_pb2
 from google.protobuf.json_format import ParseDict
 from google.protobuf.message import Message
 
+import storage_pb2 as storage
 import storage_resources_pb2 as resources
 import utils
+from common import error, gcs_acl
 
 
 class Bucket:
-    def __init__(self, metadata, args={}, context=None):
-        if isinstance(metadata, resources.Bucket):
-            self.metadata = metadata
+    def __init__(self, request, context):
+        predefined_acl = ""
+        predefined_default_object_acl = ""
+        if context is not None:
+            self.metadata = request.bucket
+            predefined_acl = request.predefined_acl
+            predefined_default_object_acl = request.predefined_default_object_acl
         else:
-            metadata = utils.process_data(metadata)
-            if not self.__validate_bucket_name(metadata["name"]):
-                utils.abort(
-                    412, "Bucket name %s is invalid" % metadata["name"], context
-                )
+            metadata = utils.process_data(request.data)
             self.metadata = ParseDict(metadata, resources.Bucket())
+            predefined_acl = request.args.get("predefinedAcl", "")
+            predefined_default_object_acl = request.args.get(
+                "predefinedDefaultObjectAcl", ""
+            )
+        if not self.__validate_bucket_name(self.metadata.name):
+            error.abort(412, "Bucket name %s is invalid" % self.metadata.name, context)
+        if self.metadata.iam_configuration.uniform_bucket_level_access.enabled:
+            if predefined_acl != "" and predefined_acl != 0:
+                error.abort(
+                    400, "Bad Requests: Predefined ACL is not allowed.", context
+                )
+            if (
+                predefined_default_object_acl != ""
+                and predefined_default_object_acl != 0
+            ):
+                error.abort(
+                    400,
+                    "Bad Requests: Predefined Default Object ACL is not allowed.",
+                    context,
+                )
         self.metadata.id = self.metadata.name
-        self.metadata.owner.entity = "project-owners-123456789"
-        self.metadata.owner.entity_id = (
-            self.metadata.name + "/" + "project-owners-123456789"
+        self.metadata.owner.entity = gcs_acl.project_entity("owners")
+        self.metadata.owner.entity_id = gcs_acl.entity_id(self.metadata.owner.entity)
+        self.__init_predefined_acl(predefined_acl, context)
+        self.__init_predefined_default_object_acl(
+            predefined_default_object_acl, context
         )
-        self.notification = []
         self.iam_policy = None
-        self.__init_acl()
+        self.notification = []
         self.__init_iam_policy(context)
         utils.insert_bucket(self)
 
@@ -117,31 +139,40 @@ class Bucket:
             )
         return bucket
 
-    def __init_acl(self):
-        # TODO(vnvo2409): Check for predefinedAcl
-        def make_acl_proto(entity, role):
-            return resources.BucketAccessControl(entity=entity, role=role)
+    def __init_predefined_acl(self, predefined_acl, context):
+        protobuf2rest = [
+            "",
+            "authenticatedRead",
+            "private",
+            "projectPrivate",
+            "publicRead",
+            "publicReadWrite",
+        ]
+        if context is not None:
+            predefined_acl = protobuf2rest[predefined_acl]
+        bucket = self.metadata.name
+        acls = gcs_acl.bucket_predefined_acls(bucket, predefined_acl, context)
+        self.metadata.acl.extend(acls)
 
-        self.insert_acl(make_acl_proto("project-owners-123456789", "OWNER"))
-        self.insert_acl(make_acl_proto("project-editors-123456789", "OWNER"))
-        self.insert_acl(make_acl_proto("project-viewers-123456789", "READER"))
-
-        # TODO(vnvo2409): Check for predefinedDefaultObjectAcl
-        self.insert_default_object_acl(
-            utils.make_object_acl_proto(
-                self.metadata.name, "project-owners-123456789", "OWNER"
-            )
+    def __init_predefined_default_object_acl(
+        self, predefined_default_object_acl, context
+    ):
+        protobuf2rest = [
+            "",
+            "authenticatedRead",
+            "bucketOwnerFullControl",
+            "bucketOwnerRead",
+            "private",
+            "projectPrivate",
+            "publicRead",
+        ]
+        if context is not None:
+            predefined_default_object_acl = protobuf2rest[predefined_default_object_acl]
+        bucket = self.metadata.name
+        acls = gcs_acl.bucket_predefined_default_object_acls(
+            bucket, predefined_default_object_acl, context
         )
-        self.insert_default_object_acl(
-            utils.make_object_acl_proto(
-                self.metadata.name, "project-editors-123456789", "OWNER"
-            )
-        )
-        self.insert_default_object_acl(
-            utils.make_object_acl_proto(
-                self.metadata.name, "project-viewers-123456789", "READER"
-            )
-        )
+        self.metadata.default_object_acl.extend(acls)
 
     def __init_iam_policy(self, context=None):
         role_mapping = {
@@ -280,6 +311,7 @@ class Bucket:
             "GOOGLE_CLOUD_CPP_STORAGE_TEST_BUCKET_NAME", "test-bucket"
         )
         if utils.lookup_bucket(bucket_name) is None:
-            bucket_test = Bucket(json.dumps({"name": bucket_name}))
+            request = storage.InsertBucketRequest(bucket={"name": bucket_name})
+            bucket_test = Bucket(request, "")
             bucket_test.metadata.metageneration = 4
             bucket_test.metadata.versioning.enabled = True
