@@ -26,6 +26,35 @@ remove_index = re.compile(r":[0-9]+|^[0-9]+")
 split_fields = re.compile(r"[a-zA-Z0-9]*\(.*\)|[a-zA-Z0-9]+")
 
 
+def nested_key(data):
+    if isinstance(data, list):
+        keys = []
+        for i in range(len(data)):
+            result = nested_key(data[i])
+            if isinstance(result, list):
+                if isinstance(data[i], dict):
+                    keys.extend(["[%d].%s" % (i, item) for item in result])
+                elif isinstance(data[i], list):
+                    keys.extend(["[%d]%s" % (i, item) for item in result])
+            elif result == "":
+                keys.append("[%d]" % i)
+        return keys
+    elif isinstance(data, dict):
+        keys = []
+        for key, value in data.items():
+            result = nested_key(value)
+            if isinstance(result, list):
+                if isinstance(value, dict):
+                    keys.extend(["%s.%s" % (key, item) for item in result])
+                elif isinstance(value, list):
+                    keys.extend(["%s%s" % (key, item) for item in result])
+            elif result == "":
+                keys.append("%s" % key)
+        return keys
+    else:
+        return ""
+
+
 def to_dict(source):
     if not isinstance(source, dict):
         return source

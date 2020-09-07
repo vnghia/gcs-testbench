@@ -29,7 +29,7 @@ server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
 class StorageServicer(storage_pb2_grpc.StorageServicer):
     def InsertBucket(self, request, context):
         utils.insert_test_bucket()
-        bucket = gcs_bucket.Bucket(request, context)
+        bucket = gcs_bucket.Bucket.insert(request, context)
         utils.insert_bucket(bucket)
         return bucket.metadata
 

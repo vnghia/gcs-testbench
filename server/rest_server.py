@@ -65,7 +65,7 @@ def buckets_list():
 @gcs.route("/b", methods=["POST"])
 def buckets_insert():
     utils.insert_test_bucket()
-    bucket = gcs_bucket.Bucket(flask.request, None)
+    bucket = gcs_bucket.Bucket.insert(flask.request, None)
     utils.insert_bucket(bucket)
     return bucket.to_rest(flask.request)
 
@@ -157,35 +157,35 @@ def bucket_default_object_acl_list(bucket_name):
 @gcs.route("/b/<bucket_name>/defaultObjectAcl", methods=["POST"])
 def bucket_default_object_acl_create(bucket_name):
     bucket = utils.get_bucket(bucket_name, flask.request, None)
-    acl = bucket.insert_default_object_acl(flask.request, None)
+    acl = bucket.insert_doacl(flask.request, None)
     return utils.message_to_rest(acl, constant.KIND_OBJECT_ACL)
 
 
 @gcs.route("/b/<bucket_name>/defaultObjectAcl/<entity>")
 def bucket_default_object_acl_get(bucket_name, entity):
     bucket = utils.get_bucket(bucket_name, flask.request, None)
-    acl = bucket.get_default_object_acl(entity, None)
+    acl = bucket.get_doacl(entity, None)
     return utils.message_to_rest(acl, constant.KIND_OBJECT_ACL)
 
 
 @gcs.route("/b/<bucket_name>/defaultObjectAcl/<entity>", methods=["PUT"])
 def bucket_default_object_acl_update(bucket_name, entity):
     bucket = utils.get_bucket(bucket_name, flask.request, None)
-    acl = bucket.update_default_object_acl(entity, flask.request, None)
+    acl = bucket.update_doacl(entity, flask.request, None)
     return utils.message_to_rest(acl, constant.KIND_OBJECT_ACL)
 
 
 @gcs.route("/b/<bucket_name>/defaultObjectAcl/<entity>", methods=["PATCH"])
 def bucket_default_object_acl_patch(bucket_name, entity):
     bucket = utils.get_bucket(bucket_name, flask.request, None)
-    acl = bucket.patch_default_object_acl(entity, flask.request, None)
+    acl = bucket.patch_doacl(entity, flask.request, None)
     return utils.message_to_rest(acl, constant.KIND_OBJECT_ACL)
 
 
 @gcs.route("/b/<bucket_name>/defaultObjectAcl/<entity>", methods=["DELETE"])
 def bucket_default_object_acl_delete(bucket_name, entity):
     bucket = utils.get_bucket(bucket_name, flask.request, None)
-    bucket.delete_default_object_acl(entity, None)
+    bucket.delete_doacl(entity, None)
     return ""
 
 

@@ -300,7 +300,7 @@ def insert_test_bucket():
     )
     if search_bucket(bucket_name) is None:
         request = storage.InsertBucketRequest(bucket={"name": bucket_name})
-        bucket_test = gcs_bucket.Bucket(request, "")
+        bucket_test = gcs_bucket.Bucket.insert(request, "")
         bucket_test.metadata.metageneration = 4
         bucket_test.metadata.versioning.enabled = True
         insert_bucket(bucket_test)
