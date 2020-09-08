@@ -15,6 +15,7 @@
 import argparse
 import logging
 
+from common import db
 from server import grpc_server, rest_server
 
 if __name__ == "__main__":
@@ -29,5 +30,6 @@ if __name__ == "__main__":
         "--port_rest", default="9000", help="The listening port for REST"
     )
     arguments = parser.parse_args()
-    grpc_server.run(arguments.port_grpc)
-    rest_server.run(arguments.port_rest)
+    database = db.Database.init()
+    grpc_server.run(arguments.port_grpc, database)
+    rest_server.run(arguments.port_rest, database)

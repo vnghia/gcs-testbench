@@ -24,20 +24,16 @@ PROJECT_ID = os.getenv("GOOGLE_CLOUD_CPP_STORAGE_TEST_PROJECT_ID", "123456789")
 
 
 def extract_predefined_acl(request, is_destination, context):
-    extract_field = ""
     if context is not None:
         extract_field = (
             "predefined_acl" if not is_destination else "destination_predefined_acl"
         )
+        return getattr(request, extract_field, None)
     else:
         extract_field = (
             "predefinedAcl" if not is_destination else "destinationPredefinedAcl"
         )
-    return (
-        getattr(request, extract_field, None)
-        if context is not None
-        else request.args.get(extract_field, "")
-    )
+        return request.args.get(extract_field, "")
 
 
 def extract_predefined_doacl(request, context):

@@ -31,7 +31,7 @@ from google.protobuf.message import Message
 
 import storage_pb2 as storage
 import storage_resources_pb2 as resources
-from common import error, gcs_bucket, gcs_generation
+from common import error, gcs_bucket
 
 # regex
 remove_index = re.compile(r":[0-9]+|^[0-9]+")
@@ -283,15 +283,15 @@ def corrupt_media(media):
 # buckets
 
 
-GCS_BUCKETS = dict()
-GCS_OBJECTS = dict()
-GCS_UPLOADS = dict()
-GCS_REWRITES = dict()
+GCS_BUCKETS = {}
+GCS_OBJECTS = {}
+GCS_UPLOADS = {}
+GCS_REWRITES = {}
 
 
 def insert_bucket(bucket):
     GCS_BUCKETS[bucket.metadata.name] = bucket
-    GCS_OBJECTS[bucket.metadata.name] = dict()
+    GCS_OBJECTS[bucket.metadata.name] = {}
 
 
 def insert_test_bucket():
@@ -310,7 +310,6 @@ def get_bucket(bucket_name, request, context):
     bucket = search_bucket(bucket_name)
     if bucket is None:
         error.abort(404, "Bucket %s does not exist." % bucket_name, context)
-    gcs_generation.check_bucket_metageneration(bucket, request, context)
     return bucket
 
 

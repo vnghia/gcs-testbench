@@ -12,27 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import base64
-import random
-import struct
-import hashlib
 
-
-def random_str(prefix):
-    return prefix + str(random.getrandbits(32))
-
-
-def random_bytes(prefix):
-    return random_str(prefix).encode("utf-8")
-
-
-def base64_crc32c(value):
-    return base64.b64encode(struct.pack(">I", value)).decode("utf-8")
-
-
-def random_bigint(size=63):
-    return random.getrandbits(size)
-
-
-def base64_md5(content):
-    return base64.b64encode(hashlib.md5(content).digest()).decode("utf-8")
+class FakeRequest:
+    def __init__(self, args, headers, data):
+        self.args = args
+        self.headers = headers
+        self.data = data

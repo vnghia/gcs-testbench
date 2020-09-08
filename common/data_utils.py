@@ -11,28 +11,10 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
-import base64
 import random
-import struct
-import hashlib
 
 
-def random_str(prefix):
-    return prefix + str(random.getrandbits(32))
-
-
-def random_bytes(prefix):
-    return random_str(prefix).encode("utf-8")
-
-
-def base64_crc32c(value):
-    return base64.b64encode(struct.pack(">I", value)).decode("utf-8")
-
-
-def random_bigint(size=63):
-    return random.getrandbits(size)
-
-
-def base64_md5(content):
-    return base64.b64encode(hashlib.md5(content).digest()).decode("utf-8")
+def corrupt_media(media):
+    if not media:
+        return bytearray(random.sample("abcdefghijklmnopqrstuvwxyz", 1), "utf-8")
+    return b"B" + media[1:] if media[0:1] == b"A" else b"A" + media[1:]

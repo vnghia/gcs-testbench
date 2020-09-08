@@ -18,9 +18,8 @@ import json
 import random
 import time
 
+from common import error
 import flask
-
-import utils
 
 
 class ServiceAccount(object):
@@ -75,12 +74,12 @@ class ServiceAccount(object):
         """Delete an existing HMAC key from the service account."""
         key = self.keys.get(key_id)
         if key is None:
-            utils.abort(404, "Cannot find key for key %s" % key_id)
+            error.abort(404, "Cannot find key for key %s" % key_id)
         resource = key.get("metadata")
         if resource is None:
-            utils.abort(500, "Missing resource for HMAC key %s" % key_id)
+            error.abort(500, "Missing resource for HMAC key %s" % key_id)
         if resource.get("state") == "ACTIVE":
-            utils.abort(400, "Cannot delete ACTIVE key %s" % key_id)
+            error.abort(400, "Cannot delete ACTIVE key %s" % key_id)
         resource["state"] = "DELETED"
         self.keys.pop(key_id)
         return resource
@@ -89,10 +88,10 @@ class ServiceAccount(object):
         """Get an existing HMAC key from the service account."""
         key = self.keys.get(key_id)
         if key is None:
-            utils.abort(404, "Cannot find key for key %s" % key_id)
+            error.abort(404, "Cannot find key for key %s" % key_id)
         metadata = key.get("metadata")
         if metadata is None:
-            utils.abort(500, "Missing resource for HMAC key %s" % key_id)
+            error.abort(500, "Missing resource for HMAC key %s" % key_id)
         return metadata
 
     def _check_etag(self, key_resource, etag, where):
@@ -100,7 +99,7 @@ class ServiceAccount(object):
         expected = key_resource.get("etag")
         if etag is None or etag == expected:
             return
-        utils.abort(
+        error.abort(
             400,
             "Mismatched ETag for `HmacKeys: update` in %s expected %s, got %s"
             % (where, expected, etag),
@@ -110,18 +109,18 @@ class ServiceAccount(object):
         """Get an existing HMAC key from the service account."""
         key = self.keys.get(key_id)
         if key is None:
-            utils.abort(404, "Cannot find key for key %s" % key_id)
+            error.abort(404, "Cannot find key for key %s" % key_id)
         metadata = key.get("metadata")
         if metadata is None:
-            utils.abort(500, "Missing metadata for HMAC key %s" % key_id)
+            error.abort(500, "Missing metadata for HMAC key %s" % key_id)
         self._check_etag(metadata, payload.get("etag"), "payload")
         self._check_etag(metadata, flask.request.headers.get("if-match-etag"), "header")
 
         state = payload.get("state")
         if state not in ("ACTIVE", "INACTIVE"):
-            utils.abort(400, "Invalid state `HmacKeys: update` request %s" % key_id)
+            error.abort(400, "Invalid state `HmacKeys: update` request %s" % key_id)
         if metadata.get("state") == "DELETED":
-            utils.abort(
+            error.abort(
                 400,
                 "Cannot restore DELETED key in `HmacKeys: update` request %s" % key_id,
             )
@@ -172,7 +171,7 @@ class GcsProject(object):
         (service_account, key_id) = access_id.split(":", 2)
         sa = self.service_accounts.get(service_account)
         if sa is None:
-            utils.abort(404, "Cannot find service account for key=%s" % access_id)
+            error.abort(404, "Cannot find service account for key=%s" % access_id)
         return sa.delete_key(key_id)
 
     def get_hmac_key(self, access_id):
@@ -180,7 +179,7 @@ class GcsProject(object):
         (service_account, key_id) = access_id.split(":", 2)
         sa = self.service_accounts.get(service_account)
         if sa is None:
-            utils.abort(404, "Cannot find service account for key=%s" % access_id)
+            error.abort(404, "Cannot find service account for key=%s" % access_id)
         return sa.get_key(key_id)
 
     def update_hmac_key(self, access_id, payload):
@@ -188,7 +187,7 @@ class GcsProject(object):
         (service_account, key_id) = access_id.split(":", 2)
         sa = self.service_accounts.get(service_account)
         if sa is None:
-            utils.abort(404, "Cannot find service account for key=%s" % access_id)
+            error.abort(404, "Cannot find service account for key=%s" % access_id)
         return sa.update_key(key_id, payload)
 
 
@@ -221,7 +220,7 @@ def hmac_keys_insert(project_id):
     project = get_project(project_id)
     service_account = flask.request.args.get("serviceAccountEmail")
     if service_account is None:
-        utils.abort(400, "serviceAccount is a required parameter")
+        error.abort(400, "serviceAccount is a required parameter")
     return project.insert_hmac_key(service_account)
 
 

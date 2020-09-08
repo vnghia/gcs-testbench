@@ -14,8 +14,10 @@
 
 from common import error
 
+# === COMMON === #
 
-def extract_generation_grpc(request, is_meta, is_source):
+
+def extract_generation_condition_grpc(request, is_meta, is_source):
     match_field = ""
     not_match_field = ""
     if is_meta:
@@ -39,17 +41,19 @@ def extract_generation_grpc(request, is_meta, is_source):
             else "if_source_generation_not_match"
         )
     match = (
-        getattr(request, match_field, None) if request.HasField(match_field) else None
+        getattr(request, match_field, None).value
+        if request.HasField(match_field)
+        else None
     )
     not_match = (
-        getattr(request, not_match_field, None)
+        getattr(request, not_match_field, None).value
         if request.HasField(not_match_field)
         else None
     )
     return match, not_match
 
 
-def extract_generation_rest(request, is_meta, is_source):
+def extract_generation_condition_rest(request, is_meta, is_source):
     match_field = ""
     not_match_field = ""
     if is_meta:
@@ -77,13 +81,17 @@ def extract_generation_rest(request, is_meta, is_source):
     return match, not_match
 
 
-def extract_generation(request, is_meta, is_source, context):
+def extract_generation_condition(request, is_meta, is_source, context):
     match = None
     not_match = None
     if context is not None:
-        match, not_match = extract_generation_grpc(request, is_meta, is_source)
+        match, not_match = extract_generation_condition_grpc(
+            request, is_meta, is_source
+        )
     else:
-        match, not_match = extract_generation_rest(request, is_meta, is_source)
+        match, not_match = extract_generation_condition_rest(
+            request, is_meta, is_source
+        )
     return match, not_match
 
 
@@ -105,7 +113,13 @@ def check_generic_generation(generation, match, not_match, is_meta, context):
         )
 
 
-def check_bucket_metageneration(bucket, request, context):
-    generation = bucket.metadata.metageneration
-    match, not_match = extract_generation(request, True, False, context)
-    check_generic_generation(generation, match, not_match, True, context)
+# === OBJECT === #
+
+
+def extract_object_generation(request, is_source, context):
+    if context is not None:
+        extract_field = "generation" if not is_source else "source_generation"
+        return getattr(request, extract_field, 0)
+    else:
+        extract_field = "generation" if not is_source else "sourceGeneration"
+        return int(request.args.get(extract_field, 0))

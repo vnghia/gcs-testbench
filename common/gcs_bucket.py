@@ -101,7 +101,7 @@ class Bucket:
         destination.updated.FromDatetime(datetime.datetime.now())
 
     @classmethod
-    def insert(cls, request, context):
+    def init(cls, request, context):
         metadata = (
             request.bucket
             if context is not None

@@ -58,8 +58,8 @@ def nested_key(data):
 def to_dict(source):
     if not isinstance(source, dict):
         return source
-    destination_dict = dict()
-    destination_list = list()
+    destination_dict = {}
+    destination_list = []
     for key, value in source.items():
         if key.isdecimal():
             destination_list.append(to_dict(value))
@@ -116,7 +116,7 @@ def fields_to_list(fields):
             result.append(items[0] + ":" + item.replace("/", ":"))
         return result
 
-    result = list()
+    result = []
     for field in split_fields.findall(fields):
         result += field_to_dict(field)
     return result
