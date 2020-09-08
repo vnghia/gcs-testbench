@@ -16,7 +16,7 @@ from google.protobuf.json_format import ParseDict
 
 import storage_pb2 as storage
 import utils
-from common import gcs_object
+from common import gcs_object, hash_utils, process
 
 
 class Rewrite:
@@ -30,7 +30,7 @@ class Rewrite:
         else:
             self.request = ParseDict(request.args, storage.RewriteObjectRequest())
         self.status = storage.RewriteResponse(
-            rewrite_token=utils.compute_md5(
+            rewrite_token=hash_utils.compute_md5(
                 (
                     self.request.source_bucket
                     + "/"
@@ -46,7 +46,7 @@ class Rewrite:
         utils.insert_rewrite(self)
 
     def to_rest(self, request, fields=None):
-        return utils.message_to_rest(
+        return process.message_to_rest(
             self.status,
             "storage#rewriteResponse",
             request.args.get("fields", fields),

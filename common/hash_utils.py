@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import crc32c
 import base64
 import random
 import struct
@@ -26,8 +27,12 @@ def random_bytes(prefix):
     return random_str(prefix).encode("utf-8")
 
 
-def base64_crc32c(value):
+def base64_int(value):
     return base64.b64encode(struct.pack(">I", value)).decode("utf-8")
+
+
+def base64_crc32c(value):
+    return base64_int(crc32c.crc32(value))
 
 
 def random_bigint(size=63):

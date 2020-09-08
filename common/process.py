@@ -140,8 +140,8 @@ def message_to_rest(
     for key in flat.keys():
         if key.endswith("createdBefore"):
             flat[key] = dateutil.parser.parse(flat[key]).strftime("%Y-%m-%d")
-        if key.endswith("crc32c"):
-            flat[key] = hash_utils.base64_crc32c(flat[key])
+        if key.endswith("crc32c") and not key.endswith("x_testbench_crc32c"):
+            flat[key] = hash_utils.base64_int(int(flat[key]))
         if fields is not None:
             re_key = remove_index.sub("", key)
             if re_key not in keep:

@@ -94,6 +94,9 @@ class Database:
             error.abort(404, "Bucket %s does not exist." % bucket_name, context)
         return bucket
 
+    def check_bucket_exist(self, bucket_name, context):
+        self.__get_bucket_object(bucket_name, context)
+
     @classmethod
     def __extract_list_object_request(cls, request, context):
         delimiter, prefix, versions = "", "", False
