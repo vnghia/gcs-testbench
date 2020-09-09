@@ -40,12 +40,16 @@ def debase64_crc32c(value):
 
 
 def debase64_md5(value):
-    return base64.b64decode(value.encode("utf-8")).decode("utf-8")
+    return base64.b64decode(value.encode("utf-8")).hex()
 
 
 def random_bigint(size=63):
     return random.getrandbits(size)
 
 
+def base64_bytes(content):
+    return base64.b64encode(content).decode("utf-8")
+
+
 def base64_md5(content):
-    return base64.b64encode(hashlib.md5(content).digest()).decode("utf-8")
+    return base64_bytes(hashlib.md5(content).digest())

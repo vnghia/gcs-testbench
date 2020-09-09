@@ -52,7 +52,47 @@ class Object:
             cls.__upsert_acl(metadata, acl, None, False, context)
 
     @classmethod
-    def __insert_multipart(cls, bucket_name, request):
+    def init(cls, metadata, media, request, context):
+        if (
+            context is None
+            and request.headers.get("x-goog-testbench-instructions")
+            == "inject-upload-data-error"
+        ):
+            media = utils.corrupt_media(media)
+        timestamp = datetime.datetime.now(datetime.timezone.utc)
+        metadata.generation = hash_utils.random_bigint()
+        metadata.metageneration = 1
+        metadata.id = "%s/o/%s#%d" % (
+            metadata.bucket,
+            metadata.name,
+            metadata.generation,
+        )
+        metadata.size = len(media)
+        actual_md5Hash = hash_utils.base64_md5(media)
+        if metadata.md5_hash != "" and actual_md5Hash != metadata.md5_hash:
+            error.abort(
+                412,
+                "Object checksum md5 does not match. Expected %s Actual %s"
+                % (metadata.md5_hash, actual_md5Hash),
+                context,
+            )
+        actual_crc32c = crc32c.crc32(media)
+        if metadata.HasField("crc32c") and actual_crc32c != metadata.crc32c.value:
+            error.abort(
+                400,
+                "Object checksum crc32c does not match. Expected %s Actual %s"
+                % (metadata.crc32c, actual_crc32c),
+                context,
+            )
+        metadata.md5_hash = actual_md5Hash
+        metadata.crc32c.value = actual_crc32c
+        metadata.time_created.FromDatetime(timestamp)
+        metadata.updated.FromDatetime(timestamp)
+        cls.__update_predefined_acl(request, metadata, True, context)
+        return Object(metadata, media)
+
+    @classmethod
+    def init_multipart(cls, bucket_name, request):
         metadata, media_headers, media = rest_utils.parse_multipart(request)
         metadata["name"] = request.args.get("name", metadata.get("name", None))
         if metadata["name"] is None:
@@ -80,71 +120,27 @@ class Object:
         metadata["metadata"]["x_testbench_upload"] = "multipart"
         if "md5Hash" in metadata:
             metadata["metadata"]["x_testbench_md5"] = metadata["md5Hash"]
-            metadata["md5Hash"] = hash_utils.debase64_md5(metadata["md5Hash"])
+            metadata["md5Hash"] = metadata["md5Hash"]
         if "crc32c" in metadata:
             metadata["metadata"]["x_testbench_crc32c"] = metadata["crc32c"]
             metadata["crc32c"] = hash_utils.debase64_crc32c(metadata["crc32c"])
         metadata.update(utils.extract_encryption(request))
-        return ParseDict(metadata, resources.Object()), media
+        return cls.init(ParseDict(metadata, resources.Object()), media, request, None)
 
     @classmethod
-    def init(cls, metadata, media, request, context):
-        if (
-            context is None
-            and request.headers.get("x-goog-testbench-instructions")
-            == "inject-upload-data-error"
-        ):
-            media = utils.corrupt_media(media)
-        timestamp = datetime.datetime.now(datetime.timezone.utc)
-        metadata.generation = hash_utils.random_bigint()
-        metadata.metageneration = 1
-        metadata.id = "%s/o/%s#%d" % (
-            metadata.bucket,
-            metadata.name,
-            metadata.generation,
+    def init_media(cls, bucket_name, request):
+        object_name = request.args.get("name", None)
+        media = request.data
+        if object_name is None:
+            error.abort(412, "name not set in Objects: insert", None)
+        metadata = ParseDict(
+            {
+                "bucket": bucket_name,
+                "name": object_name,
+                "metadata": {"x_testbench_upload": "simple"},
+            },
+            resources.Object(),
         )
-        metadata.size = len(media)
-        actual_md5Hash = hashlib.md5(media).hexdigest()
-        if metadata.md5_hash != "" and actual_md5Hash != metadata.md5_hash:
-            error.abort(
-                412,
-                "Object checksum md5 does not match. Expected %s Actual %s"
-                % (metadata.md5_hash, actual_md5Hash),
-                context,
-            )
-        actual_crc32c = crc32c.crc32(media)
-        if metadata.HasField("crc32c") and actual_crc32c != metadata.crc32c.value:
-            error.abort(
-                400,
-                "Object checksum crc32c does not match. Expected %s Actual %s"
-                % (metadata.crc32c, actual_crc32c),
-                context,
-            )
-        metadata.md5_hash = actual_md5Hash
-        metadata.crc32c.value = actual_crc32c
-        metadata.time_created.FromDatetime(timestamp)
-        metadata.updated.FromDatetime(timestamp)
-        cls.__update_predefined_acl(request, metadata, True, context)
-        return Object(metadata, media)
-
-    @classmethod
-    def init_json(cls, bucket_name, upload_type, request):
-        metadata, media = None, None
-        if upload_type == "media":
-            object_name = request.args.get("name", None)
-            media = request.data
-            if object_name is None:
-                error.abort(412, "name not set in Objects: insert", None)
-            metadata = ParseDict(
-                {
-                    "bucket": bucket_name,
-                    "name": object_name,
-                    "metadata": {"x_testbench_upload": "simple"},
-                },
-                resources.Object(),
-            )
-        elif upload_type == "multipart":
-            metadata, media = cls.__insert_multipart(bucket_name, request)
         return cls.init(metadata, media, request, None)
 
     @classmethod
@@ -158,10 +154,12 @@ class Object:
             },
             resources.Object(),
         )
-        fake_request = rest_utils.FakeRequest({}, {}, None)
-        fake_request.headers["x-goog-testbench-instructions"] = request.headers.get(
-            "x-goog-testbench-instructions"
-        )
+        fake_request = rest_utils.FakeRequest({}, None, None)
+        fake_request.headers = {
+            key.lower(): value
+            for key, value in request.headers.items()
+            if key.lower().startswith("x-goog-")
+        }
         if "content-type" in request.headers:
             metadata.content_type = request.headers["content-type"]
         if "x-goog-if-generation-match" in request.headers:
@@ -407,15 +405,17 @@ class Object:
 
         headers = {
             "Content-Range": content_range,
-            "x-goog-hash": self.__x_goog_hash_header(),
+            "x-goog-hash": self.x_goog_hash_header(),
             "x-goog-generation": self.metadata.generation,
         }
         return flask.Response(response_stream(), status=200, headers=headers)
 
-    def __x_goog_hash_header(self):
+    def x_goog_hash_header(self):
         header = ""
         if "x_testbench_crc32c" in self.metadata.metadata:
             header += "crc32c=" + self.metadata.metadata["x_testbench_crc32c"]
         if "x_testbench_md5" in self.metadata.metadata:
-            header += ",md5=" + self.metadata.metadata["x_testbench_mdd5"]
+            if header != "":
+                header += ","
+            header += "md5=" + self.metadata.metadata["x_testbench_md5"]
         return header if header != "" else None

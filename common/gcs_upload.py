@@ -54,9 +54,12 @@ class Upload:
                 metadata = resources.Object()
                 metadata.name = name
             location = request.url
-            request = rest_utils.FakeRequest(
-                dict(request.args), dict(request.headers), None
-            )
+            headers = {
+                key.lower(): value
+                for key, value in request.headers.items()
+                if key.lower().startswith("x-goog-")
+            }
+            request = rest_utils.FakeRequest(request.args.to_dict(), headers, None)
         if metadata.name == "":
             error.abort(400, "Missing object name argument", context)
         metadata.bucket = bucket_name

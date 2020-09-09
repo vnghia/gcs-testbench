@@ -453,17 +453,20 @@ def objects_insert(bucket_name):
         error.abort(400, "uploadType not set in Objects: insert", None)
     if upload_type not in {"multipart", "media", "resumable"}:
         error.abort(400, "testbench does not support %s uploadType" % upload_type, None)
+    obj = None
     if upload_type == "resumable":
         upload = gcs_upload.Upload.init(bucket_name, flask.request, None)
         db.insert_upload(upload)
         return upload.to_rest()
-    else:
-        obj = gcs_object.Object.init_json(bucket_name, upload_type, flask.request)
-        db.check_object_generation(
-            bucket_name, obj.metadata.name, flask.request, False, None
-        )
-        db.insert_object(bucket_name, obj, None)
-        return obj.to_rest(flask.request)
+    elif upload_type == "media":
+        obj = gcs_object.Object.init_media(bucket_name, flask.request)
+    elif upload_type == "multipart":
+        obj = gcs_object.Object.init_multipart(bucket_name, flask.request)
+    db.check_object_generation(
+        bucket_name, obj.metadata.name, flask.request, False, None
+    )
+    db.insert_object(bucket_name, obj, None)
+    return obj.to_rest(flask.request)
 
 
 @upload.route("/b/<bucket_name>/o", methods=["PUT"])
@@ -513,13 +516,16 @@ def resumable_upload_chunk(bucket_name):
                 False,
                 None,
             )
-            obj = gcs_object.Object(upload.metadata, upload.media)
             if (
                 upload.request.headers.get("x-goog-testbench-instructions")
                 == "inject-upload-data-error"
             ):
-                obj.media = data_utils.corrupt_media(obj.media)
+                upload.media = data_utils.corrupt_media(upload.media)
+            obj = gcs_object.Object.init(
+                upload.metadata, upload.media, upload.request, None
+            )
             db.insert_object(bucket_name, obj, None)
+            return obj.to_rest(request)
     if upload.complete:
         return db.get_object(
             bucket_name, upload.metadata.name, upload.request, False, None
