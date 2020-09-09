@@ -18,7 +18,6 @@ import time
 
 import flask
 import crc32c
-import hashlib
 from google.protobuf.json_format import ParseDict
 
 import storage_resources_pb2 as resources
@@ -88,6 +87,8 @@ class Object:
         metadata.crc32c.value = actual_crc32c
         metadata.time_created.FromDatetime(timestamp)
         metadata.updated.FromDatetime(timestamp)
+        metadata.owner.entity = gcs_acl.object_entity("owners")
+        metadata.owner.entity_id = gcs_acl.entity_id(metadata.owner.entity)
         cls.__update_predefined_acl(request, metadata, True, context)
         return Object(metadata, media)
 
@@ -154,32 +155,25 @@ class Object:
             },
             resources.Object(),
         )
+        if "content-type" in request.headers:
+            metadata.content_type = request.headers["content-type"]
         fake_request = rest_utils.FakeRequest({}, None, None)
         fake_request.headers = {
             key.lower(): value
             for key, value in request.headers.items()
             if key.lower().startswith("x-goog-")
         }
-        if "content-type" in request.headers:
-            metadata.content_type = request.headers["content-type"]
-        if "x-goog-if-generation-match" in request.headers:
-            fake_request.args["ifGenerationMatch"] = request.headers[
-                "x-goog-if-generation-match"
-            ]
-        if "x-goog-if-meta-generation-match" in request.headers:
-            fake_request.args["ifMetagenerationMatch"] = request.headers[
-                "x-goog-if-meta-generation-match"
-            ]
-        x_goog_hash = request.headers.get("x-goog-hash")
+        rest_utils.xml_headers_to_json_args(fake_request.headers, fake_request.args)
+        x_goog_hash = fake_request.headers.get("x-goog-hash")
         if x_goog_hash is not None:
             for checksum in x_goog_hash.split(","):
                 if checksum.startswith("md5="):
                     md5Hash = checksum[4:]
-                    metadata.md5_hash = hash_utils.debase64_md5(md5Hash)
+                    metadata.md5_hash = md5Hash
                 if checksum.startswith("crc32c="):
                     crc32c_value = checksum[7:]
                     metadata.crc32c.value = hash_utils.debase64_crc32c(crc32c_value)
-        return cls.init(metadata, media, fake_request, None)
+        return cls.init(metadata, media, fake_request, None), fake_request
 
     @classmethod
     def __update_metadata(cls, source, destination, update_mask):

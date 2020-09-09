@@ -602,7 +602,8 @@ def xmlapi_get_object(bucket_name, object_name):
 @xmlapi.route("/<bucket_name>/<object_name>", methods=["PUT"])
 def xmlapi_put_object(bucket_name, object_name):
     db.insert_test_bucket()
-    obj = gcs_object.Object.init_xml(bucket_name, object_name, flask.request)
+    obj, request = gcs_object.Object.init_xml(bucket_name, object_name, flask.request)
+    db.check_object_generation(bucket_name, obj.metadata.name, request, False, None)
     db.insert_object(bucket_name, obj, None)
     return ""
 

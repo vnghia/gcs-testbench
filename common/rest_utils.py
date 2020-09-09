@@ -56,3 +56,14 @@ def parse_multipart(request):
     metadata = json.loads(resource)
     media_headers, media = parse_part(parts[2])
     return metadata, media_headers, media
+
+
+def xml_headers_to_json_args(headers, args):
+    field_map = {
+        "x-goog-if-generation-match": "ifGenerationMatch",
+        "x-goog-if-meta-generation-match": "ifMetagenerationMatch",
+        "x-goog-acl": "predefinedAcl",
+    }
+    for field_xml, field_json in field_map.items():
+        if field_xml in headers:
+            args[field_json] = headers[field_xml]

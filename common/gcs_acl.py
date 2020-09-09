@@ -240,8 +240,23 @@ def object_object_acl(bucket_name, object_name, generation, role, context):
 def object_predefined_acls(
     bucket_name, object_name, generation, predefined_acl, context
 ):
+    if context is None:
+        predefined_acl_map = {
+            "authenticatedRead": 1,
+            "authenticated-read": 1,
+            "bucketOwnerFullControl": 2,
+            "bucket-owner-full-control": 2,
+            "bucketOwnerRead": 3,
+            "bucket-owner-read": 3,
+            "private": 4,
+            "projectPrivate": 5,
+            "project-private": 5,
+            "publicRead": 6,
+            "public-read": 6,
+        }
+        predefined_acl = predefined_acl_map.get(predefined_acl)
     acls = []
-    if predefined_acl == "authenticatedRead" or predefined_acl == 1:
+    if predefined_acl == 1:
         acls.append(
             object_object_acl(bucket_name, object_name, generation, "OWNER", context)
         )
@@ -255,14 +270,14 @@ def object_predefined_acls(
                 context,
             )
         )
-    elif predefined_acl == "bucketOwnerFullControl" or predefined_acl == 2:
+    elif predefined_acl == 2:
         acls.append(
             object_object_acl(bucket_name, object_name, generation, "OWNER", context)
         )
         acls.append(
             object_project_acl(bucket_name, object_name, generation, "OWNER", context)
         )
-    elif predefined_acl == "bucketOwnerRead" or predefined_acl == 3:
+    elif predefined_acl == 3:
         acls.append(
             object_object_acl(bucket_name, object_name, generation, "OWNER", context)
         )
@@ -276,11 +291,11 @@ def object_predefined_acls(
                 context,
             )
         )
-    elif predefined_acl == "private" or predefined_acl == 4:
+    elif predefined_acl == 4:
         acls.append(
             object_object_acl(bucket_name, object_name, generation, "OWNER", context)
         )
-    elif predefined_acl == "projectPrivate" or predefined_acl == 5:
+    elif predefined_acl == 5:
         acls.append(
             object_object_acl(bucket_name, object_name, generation, "OWNER", context)
         )
@@ -290,7 +305,7 @@ def object_predefined_acls(
         acls.append(
             object_object_acl(bucket_name, object_name, generation, "READER", context)
         )
-    elif predefined_acl == "publicRead" or predefined_acl == 6:
+    elif predefined_acl == 6:
         acls.append(
             object_object_acl(bucket_name, object_name, generation, "OWNER", context)
         )
