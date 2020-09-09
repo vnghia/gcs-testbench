@@ -18,24 +18,25 @@ import re
 
 import flask
 from google.protobuf.json_format import ParseDict
+import storage_resources_pb2 as resources
 
-from common import error, process
+from common import error, process, rest_utils
 
 content_range_split = re.compile(r"bytes (\*|[0-9]+-[0-9]+)\/(\*|[0-9]+)")
 
 
 class Upload:
-    def __init__(self, metadata, upload_id, location, media, complete, headers):
+    def __init__(self, metadata, upload_id, location, media, complete, request):
         self.metadata = metadata
         self.upload_id = upload_id
         self.location = location
         self.media = media
         self.complete = complete
-        self.headers = headers
+        self.request = request
 
     @classmethod
     def init(cls, bucket_name, request, context):
-        metadata, location, headers = None, "", {}
+        metadata, location = None, ""
         if context is not None:
             metadata = request.resource
         else:
@@ -53,7 +54,9 @@ class Upload:
                 metadata = resources.Object()
                 metadata.name = name
             location = request.url
-            headers = dict(request.headers)
+            request = rest_utils.FakeRequest(
+                dict(request.args), dict(request.headers), None
+            )
         if metadata.name == "":
             error.abort(400, "Missing object name argument", context)
         metadata.bucket = bucket_name
@@ -61,7 +64,7 @@ class Upload:
             ("%s/o/%s" % (bucket_name, metadata.name)).encode("utf-8")
         ).hexdigest()
         location = "%s&upload_id=%s" % (location, upload_id)
-        return Upload(metadata, upload_id, location, b"", False, headers)
+        return Upload(metadata, upload_id, location, b"", False, request)
 
     def to_rest(self):
         response = flask.make_response("")
@@ -70,8 +73,8 @@ class Upload:
 
     def status_rest(self):
         response = flask.make_response()
-        if self.committed_size > 1 and not self.complete:
-            response.headers["Range"] = "bytes=0-%d" % (self.committed_size - 1)
+        if len(self.media) > 1 and not self.complete:
+            response.headers["Range"] = "bytes=0-%d" % (len(self.media) - 1)
         response.data = "" if not self.complete else self.media
         response.status_code = 308 if not self.complete else 200
         return response

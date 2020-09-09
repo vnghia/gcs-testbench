@@ -13,97 +13,47 @@
 # limitations under the License.
 
 import json
-import random
+import datetime
 import time
-from datetime import datetime, timezone
 
 import flask
-from crc32c import crc32
+import crc32c
+import hashlib
 from google.protobuf.json_format import ParseDict
-from google.protobuf.message import Message
 
-import storage_pb2 as storage
 import storage_resources_pb2 as resources
 import utils
-from common import data_utils, error, gcs_upload, hash_utils, process
+from common import (
+    error,
+    hash_utils,
+    rest_utils,
+    gcs_acl,
+)
+from google.protobuf.field_mask_pb2 import FieldMask
 
 
 class Object:
-    def __init__(self, metadata, media, args={}, headers={}, context=None):
-        timestamp = datetime.now(timezone.utc)
-        if isinstance(metadata, resources.Object):
-            self.metadata = metadata
-        else:
-            metadata = process.process_data(metadata)
-            self.metadata = ParseDict(metadata, resources.Object())
-        self.metadata.generation = hash_utils.random_bigint()
-        self.metadata.metageneration = 1
-        self.metadata.id = (
-            self.metadata.bucket
-            + "/"
-            + self.metadata.name
-            + "#"
-            + str(self.metadata.generation)
-        )
+    def __init__(self, metadata, media):
+        self.metadata = metadata
         self.media = media
-        self.metadata.size = len(self.media)
-        actual_md5Hash = hash_utils.base64_md5(media)
-        if self.metadata.md5_hash != "" and actual_md5Hash != self.metadata.md5_hash:
-            error.abort(
-                412,
-                "Object checksum md5 does not match. Expected %s Actual %s"
-                % (actual_md5Hash, self.metadata.md5_hash),
-                context,
-            )
-        self.metadata.md5_hash = actual_md5Hash
-        self.metadata.crc32c.value = crc32(self.media)
-        self.metadata.time_created.FromDatetime(timestamp)
-        self.metadata.updated.FromDatetime(timestamp)
-        self.__update_acl(args, headers)
+
+    # === OBJECT === #
 
     @classmethod
-    def __parse_multipart_rest_request(cls, request):
-        content_type = request.headers.get("content-type")
-        if content_type is None or not content_type.startswith("multipart/related"):
-            error.abort(
-                412, "Missing or invalid content-type header in multipart upload", None
-            )
-        _, _, boundary = content_type.partition("boundary=")
-        if boundary is None:
-            error.abort(
-                412, "Missing boundary in content-type header in multipart upload", None
-            )
-
-        def parse_part(part):
-            result = part.split(b"\r\n")
-            if result[0] != b"" and result[-1] != b"":
-                error.abort(412, "Could not parse %s" % str(part))
-            result = list(filter(None, result))
-            headers = {}
-            if len(result) < 2:
-                result.append(b"")
-            for header in result[:-1]:
-                key, value = header.split(b": ")
-                headers[key.decode("utf-8")] = value.decode("utf-8")
-            return headers, result[-1]
-
-        boundary = bytearray(boundary, "utf-8")
-        parts = request.data.split(b"--" + boundary)
-        if parts[-1] != b"--\r\n":
-            error.abort(
-                412, "Missing end marker (--%s--) in media body" % boundary, None
-            )
-        _, resource = parse_part(parts[1])
-        metadata = json.loads(resource)
-        media_headers, media = parse_part(parts[2])
-        return metadata, media_headers, media
+    def __update_predefined_acl(cls, request, metadata, set_default, context):
+        predefined_acl = gcs_acl.extract_predefined_acl(request, False, context)
+        if predefined_acl == "" or predefined_acl == 0:
+            if set_default:
+                predefined_acl = "private"
+        acls = gcs_acl.object_predefined_acls(
+            metadata.bucket, metadata.name, metadata.generation, predefined_acl, context
+        )
+        for acl in acls:
+            cls.__upsert_acl(metadata, acl, None, False, context)
 
     @classmethod
-    def __insert_rest_multipart(cls, bucket_name, request):
-        metadata, media_headers, media = cls.__parse_multipart_rest_request(request)
-        instructions = request.headers.get("x-goog-testbench-instructions")
-        if instructions == "inject-upload-data-error":
-            media = data_utils.corrupt_media(media)
+    def __insert_multipart(cls, bucket_name, request):
+        metadata, media_headers, media = rest_utils.parse_multipart(request)
         metadata["name"] = request.args.get("name", metadata.get("name", None))
         if metadata["name"] is None:
             error.abort(412, "name not set in Objects: insert", None)
@@ -130,263 +80,259 @@ class Object:
         metadata["metadata"]["x_testbench_upload"] = "multipart"
         if "md5Hash" in metadata:
             metadata["metadata"]["x_testbench_md5"] = metadata["md5Hash"]
-            actual_md5Hash = hash_utils.base64_md5(media)
-            if actual_md5Hash != metadata["md5Hash"]:
-                error.abort(
-                    412,
-                    "Object checksum md5 does not match. Expected %s Actual %s"
-                    % (actual_md5Hash, metadata["md5Hash"]),
-                    None,
-                )
-            del metadata["md5Hash"]
+            metadata["md5Hash"] = hash_utils.debase64_md5(metadata["md5Hash"])
         if "crc32c" in metadata:
             metadata["metadata"]["x_testbench_crc32c"] = metadata["crc32c"]
-            actual_crc32c = hash_utils.base64_crc32c(media)
-            if actual_crc32c != metadata["crc32c"]:
-                error.abort(
-                    400,
-                    "Object checksum crc32c does not match. Expected %s Actual %s"
-                    % (actual_crc32c, metadata["crc32c"]),
-                    None,
-                )
-            del metadata["crc32c"]
+            metadata["crc32c"] = hash_utils.debase64_crc32c(metadata["crc32c"])
         metadata.update(utils.extract_encryption(request))
-        obj = Object(metadata, media, request.args, request.headers)
-        return obj
+        return ParseDict(metadata, resources.Object()), media
 
     @classmethod
-    def __insert_rest_xml(cls, bucket_name, object_name, request):
-        media = utils.extract_media(request)
-        instructions = request.headers.get("x-goog-testbench-instructions")
-        if instructions == "inject-upload-data-error":
+    def init(cls, metadata, media, request, context):
+        if (
+            context is None
+            and request.headers.get("x-goog-testbench-instructions")
+            == "inject-upload-data-error"
+        ):
             media = utils.corrupt_media(media)
-        metadata = {}
-        metadata["bucket"] = bucket_name
-        metadata["name"] = object_name
-        if "content-type" in request.headers:
-            metadata["contentType"] = request.headers["content-type"]
-        args = {}
-        if "x-goog-if-generation-match" in request.headers:
-            args["ifGenerationMatch"] = request.headers["x-goog-if-generation-match"]
-        if "x-goog-if-meta-generation-match" in request.headers:
-            args["ifMetagenerationMatch"] = request.headers[
-                "x-goog-if-meta-generation-match"
-            ]
-        goog_hash = request.headers.get("x-goog-hash")
-        if goog_hash is not None:
-            for hash in goog_hash.split(","):
-                if hash.startswith("md5="):
-                    md5Hash = hash[4:]
-                    actual_md5Hash = utils.compute_md5(media)
-                    if actual_md5Hash != md5Hash:
-                        utils.abort(
-                            412,
-                            "Object checksum md5 does not match. Expected %s Actual %s"
-                            % (actual_md5Hash, md5Hash),
-                        )
-                if hash.startswith("crc32c="):
-                    crc32c = hash[7:]
-                    actual_crc32c = utils.compute_crc32c(media)
-                    if actual_crc32c != crc32c:
-                        utils.abort(
-                            400,
-                            "Object checksum crc32c does not match. Expected %s Actual %s"
-                            % (actual_crc32c, crc32c),
-                        )
-        utils.check_object_generation(bucket_name, object_name, args)
-        obj = Object(metadata, media, request.args, request.headers)
-        obj.metadata.metadata["x_testbench_upload"] = "xml"
-        return obj
+        timestamp = datetime.datetime.now(datetime.timezone.utc)
+        metadata.generation = hash_utils.random_bigint()
+        metadata.metageneration = 1
+        metadata.id = "%s/o/%s#%d" % (
+            metadata.bucket,
+            metadata.name,
+            metadata.generation,
+        )
+        metadata.size = len(media)
+        actual_md5Hash = hashlib.md5(media).hexdigest()
+        if metadata.md5_hash != "" and actual_md5Hash != metadata.md5_hash:
+            error.abort(
+                412,
+                "Object checksum md5 does not match. Expected %s Actual %s"
+                % (metadata.md5_hash, actual_md5Hash),
+                context,
+            )
+        actual_crc32c = crc32c.crc32(media)
+        if metadata.HasField("crc32c") and actual_crc32c != metadata.crc32c.value:
+            error.abort(
+                400,
+                "Object checksum crc32c does not match. Expected %s Actual %s"
+                % (metadata.crc32c, actual_crc32c),
+                context,
+            )
+        metadata.md5_hash = actual_md5Hash
+        metadata.crc32c.value = actual_crc32c
+        metadata.time_created.FromDatetime(timestamp)
+        metadata.updated.FromDatetime(timestamp)
+        cls.__update_predefined_acl(request, metadata, True, context)
+        return Object(metadata, media)
 
     @classmethod
-    def __insert_rest(cls, bucket_name, request, xml_object_name=None):
-        if xml_object_name is not None:
-            return cls.__insert_rest_xml(bucket_name, xml_object_name, request)
-
-    @classmethod
-    def init_rest(cls, bucket_name, upload_type, request):
+    def init_json(cls, bucket_name, upload_type, request):
+        metadata, media = None, None
         if upload_type == "media":
             object_name = request.args.get("name", None)
-            instructions = request.headers.get("x-goog-testbench-instructions")
             media = request.data
-            if instructions == "inject-upload-data-error":
-                media = utils.corrupt_media(media)
             if object_name is None:
                 error.abort(412, "name not set in Objects: insert", None)
-            obj = Object(
-                {"bucket": bucket_name, "name": object_name},
-                media,
-                request.args,
-                request.headers,
+            metadata = ParseDict(
+                {
+                    "bucket": bucket_name,
+                    "name": object_name,
+                    "metadata": {"x_testbench_upload": "simple"},
+                },
+                resources.Object(),
             )
-            obj.metadata.metadata["x_testbench_upload"] = "simple"
-            return obj
         elif upload_type == "multipart":
-            return cls.__insert_rest_multipart(bucket_name, request)
+            metadata, media = cls.__insert_multipart(bucket_name, request)
+        return cls.init(metadata, media, request, None)
 
     @classmethod
-    def __insert_grpc(cls, bucket_name, request):
-        pass
+    def init_xml(cls, bucket_name, object_name, request):
+        media = request.data
+        metadata = ParseDict(
+            {
+                "bucket": bucket_name,
+                "name": object_name,
+                "metadata": {"x_testbench_upload": "xml"},
+            },
+            resources.Object(),
+        )
+        fake_request = rest_utils.FakeRequest({}, {}, None)
+        fake_request.headers["x-goog-testbench-instructions"] = request.headers.get(
+            "x-goog-testbench-instructions"
+        )
+        if "content-type" in request.headers:
+            metadata.content_type = request.headers["content-type"]
+        if "x-goog-if-generation-match" in request.headers:
+            fake_request.args["ifGenerationMatch"] = request.headers[
+                "x-goog-if-generation-match"
+            ]
+        if "x-goog-if-meta-generation-match" in request.headers:
+            fake_request.args["ifMetagenerationMatch"] = request.headers[
+                "x-goog-if-meta-generation-match"
+            ]
+        x_goog_hash = request.headers.get("x-goog-hash")
+        if x_goog_hash is not None:
+            for checksum in x_goog_hash.split(","):
+                if checksum.startswith("md5="):
+                    md5Hash = checksum[4:]
+                    metadata.md5_hash = hash_utils.debase64_md5(md5Hash)
+                if checksum.startswith("crc32c="):
+                    crc32c_value = checksum[7:]
+                    metadata.crc32c.value = hash_utils.debase64_crc32c(crc32c_value)
+        return cls.init(metadata, media, fake_request, None)
 
     @classmethod
-    def insert(cls, bucket_name, request, xml_object_name=None, context=None):
-        # bucket = utils.search_bucket(bucket_name)
-        # if bucket is None:
-        #     utils.abort(404, "Bucket %s does not exist", context)
-        if isinstance(request, storage.InsertObjectRequest):
-            return cls.__insert_grpc(bucket_name, request)
+    def __update_metadata(cls, source, destination, update_mask):
+        update_mask.MergeMessage(source, destination, True, True)
+        destination.metageneration += 1
+        destination.updated.FromDatetime(datetime.datetime.now(datetime.timezone.utc))
+
+    def patch(self, request, context):
+        update_mask = FieldMask()
+        metadata = None
+        if context is not None:
+            metadata = request.metadata
+            if not request.HasField("update_mask"):
+                error.abort(412, "PatchObjectRequest does not have field update_mask.")
+            paths = [field[0].name for field in metadata.ListFields()]
+            if paths != request.update_mask.paths:
+                error.abort(412, "PatchObjectRequest does not match update_mask.")
+            update_mask = request.update_mask
         else:
-            return cls.__insert_rest(bucket_name, request, xml_object_name)
+            data = json.loads(request.data)
+            if "metadata" in data:
+                if data["metadata"] is None:
+                    self.metadata.metadata.clear()
+                else:
+                    for key, value in data["metadata"].items():
+                        if value is None:
+                            self.metadata.metadata.pop(key, None)
+                        else:
+                            self.metadata.metadata[key] = value
+            data.pop("metadata", None)
+            paths = ",".join(data.keys())
+            update_mask.FromJsonString(paths)
+            metadata = ParseDict(data, resources.Object())
+        self.__update_metadata(metadata, self.metadata, update_mask)
+        self.__update_predefined_acl(request, self.metadata, False, context)
 
-    @classmethod
-    def lookup(cls, bucket_name, object_name, args=None, source=False, context=None):
-        generation_field = "generation" if not source else "sourceGeneration"
-        if isinstance(args, Message):
-            current_generation = str(args.generation) if args.generation != 0 else ""
-        else:
-            current_generation = (
-                str(args.get(generation_field))
-                if args is not None and args.get(generation_field) is not None
-                else ""
+    def update(self, request, context):
+        metadata = (
+            request.metadata
+            if context is not None
+            else ParseDict(
+                json.loads(request.data),
+                resources.Object(),
             )
-        obj = utils.check_object_generation(
-            bucket_name, object_name, args, current_generation, source, context=context
         )
-        if obj is None:
-            utils.abort(404, "Object %s does not exist" % object_name, context)
-        return obj
-
-    def lookup_acl(self, entity):
-        for i in range(len(self.metadata.acl)):
-            if self.metadata.acl[i].entity == entity:
-                return self.metadata.acl[i], i
-        utils.abort(404, "Acl %s does not exist" % entity)
-
-    def insert_acl(self, data, update=False):
-        acl = (
-            data
-            if isinstance(data, resources.ObjectAccessControl)
-            else ParseDict(utils.process_data(data), resources.ObjectAccessControl())
+        update_mask = FieldMask(
+            paths=[
+                "content_encoding",
+                "content_disposition",
+                "cache_control",
+                "acl",
+                "content_language",
+                "content_type",
+                "storage_class",
+                "kms_key_name",
+                "temporary_hold",
+                "retention_expiration_time",
+                "metadata",
+                "event_based_hold",
+                "customer_encryption",
+            ]
         )
-        acl.etag = utils.random_etag(acl.entity + acl.role)
-        acl.id = self.metadata.name + "/" + acl.entity
-        acl.bucket = self.metadata.bucket
-        if update:
-            _, index = self.lookup_acl(acl.entity)
-            self.metadata.acl[index].MergeFrom(acl)
-            return self.metadata.acl[index]
+        self.__update_metadata(metadata, self.metadata, update_mask)
+        self.__update_predefined_acl(request, self.metadata, False, context)
+
+    # === OBJECT ACL === #
+
+    @classmethod
+    def __search_acl(cls, metadata, entity):
+        for i in range(len(metadata.acl)):
+            if metadata.acl[i].entity == entity:
+                return i
+
+    @classmethod
+    def __upsert_acl(cls, metadata, acl, update_mask, update_only, context):
+        index = cls.__search_acl(metadata, acl.entity)
+        if index is not None:
+            if update_mask is None:
+                update_mask = FieldMask(
+                    paths=resources.ObjectAccessControl.DESCRIPTOR.fields_by_name.keys()
+                )
+            update_mask.MergeMessage(acl, metadata.acl[index])
+            return metadata.acl[index]
+        elif update_only:
+            error.abort(404, "ACL %s does not exist" % acl.entity, context)
         else:
-            self.metadata.acl.append(acl)
+            metadata.acl.append(acl)
             return acl
 
-    def delete_acl(self, entity):
-        _, index = self.lookup_acl(entity)
+    def __get_acl(self, entity, context):
+        index = self.__search_acl(self.metadata, entity)
+        if index is None:
+            error.abort(404, "ACL %s does not exist" % entity, context)
+        return index
+
+    def get_acl(self, entity, context):
+        index = self.__get_acl(entity, context)
+        return self.metadata.acl[index]
+
+    def insert_acl(self, request, context):
+        acl = None
+        if context is None:
+            payload = json.loads(request.data)
+            acl = gcs_acl.object_entity_acl(
+                self.metadata.bucket,
+                self.metadata.name,
+                self.metadata.generation,
+                payload["entity"],
+                payload["role"],
+                context,
+            )
+        else:
+            acl = request.object_access_control
+            acl = gcs_acl.object_entity_acl(
+                self.metadata.bucket,
+                self.metadata.name,
+                self.metadata.generation,
+                request.object_access_control.entity,
+                request.object_access_control.role,
+                context,
+            )
+        return self.__upsert_acl(self.metadata, acl, None, False, context)
+
+    def update_acl(self, entity, request, context):
+        acl = (
+            request.object_access_control
+            if context is not None
+            else ParseDict(json.loads(request.data), resources.ObjectAccessControl())
+        )
+        acl.entity = entity
+        return self.__upsert_acl(self.metadata, acl, None, True, context)
+
+    def patch_acl(self, entity, request, context):
+        update_mask = FieldMask()
+        acl = None
+        if context is not None:
+            acl = request.object_access_control
+            update_mask = request.update_mask
+        else:
+            data = json.loads(request.data)
+            acl = ParseDict(data, resources.ObjectAccessControl())
+            paths = ",".join(data.keys())
+            update_mask.FromJsonString(paths)
+        acl.entity = entity
+        return self.__upsert_acl(self.metadata, acl, update_mask, True, context)
+
+    def delete_acl(self, entity, context):
+        index = self.__get_acl(entity, context)
         del self.metadata.acl[index]
 
-    def __update_acl(self, args, headers):
-        predefined_acl = None
-        if headers.get("x-goog-acl") is not None:
-            acl2json_mapping = {
-                "authenticated-read": "authenticatedRead",
-                "bucket-owner-full-control": "bucketOwnerFullControl",
-                "bucket-owner-read": "bucketOwnerRead",
-                "private": "private",
-                "project-private": "projectPrivate",
-                "public-read": "publicRead",
-            }
-            acl = headers.get("x-goog-acl")
-            predefined_acl = acl2json_mapping.get(acl)
-            if predefined_acl is None:
-                utils.abort(400, "Invalid predefinedAcl value %s" % acl)
-        else:
-            predefined_acl = args.get(
-                "predefinedAcl", args.get("destinationPredefinedAcl")
-            )
-        if predefined_acl is None:
-            predefined_acl = "projectPrivate"
-        owner_entity = "project-owners-123456789"
-        self.metadata.acl.append(
-            utils.make_object_acl_proto(
-                self.metadata.bucket,
-                owner_entity,
-                "OWNER",
-                self.metadata.name,
-            )
-        )
-        self.metadata.owner.entity = "project-owners-123456789"
-        self.metadata.owner.entity_id = (
-            self.metadata.bucket
-            + "/"
-            + self.metadata.name
-            + "/"
-            + "project-owners-123456789"
-        )
-        acl = None
-        if predefined_acl == "authenticatedRead":
-            acl = [
-                utils.make_object_acl_proto(
-                    self.metadata.bucket,
-                    "allAuthenticatedUsers",
-                    "READER",
-                    self.metadata.name,
-                )
-            ]
-        elif predefined_acl == "bucketOwnerFullControl":
-            acl = [
-                utils.make_object_acl_proto(
-                    self.metadata.bucket,
-                    owner_entity,
-                    "OWNER",
-                    self.metadata.name,
-                )
-            ]
-        elif predefined_acl == "bucketOwnerRead":
-            acl = [
-                utils.make_object_acl_proto(
-                    self.metadata.bucket,
-                    owner_entity,
-                    "READER",
-                    self.metadata.name,
-                )
-            ]
-        elif predefined_acl == "private":
-            acl = [
-                utils.make_object_acl_proto(
-                    self.metadata.bucket,
-                    "project-owners",
-                    "OWNER",
-                    self.metadata.name,
-                )
-            ]
-        elif predefined_acl == "publicRead":
-            acl = [
-                utils.make_object_acl_proto(
-                    self.metadata.bucket,
-                    "allUsers",
-                    "READER",
-                    self.metadata.name,
-                )
-            ]
-        elif predefined_acl == "projectPrivate":
-            acl = [
-                utils.make_object_acl_proto(
-                    self.metadata.bucket,
-                    "project-editors-123456789",
-                    "OWNER",
-                    self.metadata.name,
-                ),
-                utils.make_object_acl_proto(
-                    self.metadata.bucket,
-                    "project-viewers-123456789",
-                    "READER",
-                    self.metadata.name,
-                ),
-            ]
-        else:
-            utils.abort(400, "Invalid predefinedAcl value")
-        for item in acl:
-            self.insert_acl(item)
-        pass
+    # === RESPONSE === #
 
     def to_rest(self, request, fields=None):
         projection = "noAcl"
@@ -402,20 +348,6 @@ class Object:
             result.pop("acl", None)
             result.pop("owner", None)
         return result
-
-    def update(self, data):
-        metageneration = self.metadata.metageneration
-        x_testbench_metadata = {
-            key: value
-            for key, value in self.metadata.metadata.items()
-            if key.startswith("x_testbench_")
-        }
-        if isinstance(data, resources.Object):
-            self.metadata.MergeFrom(data)
-        else:
-            self.metadata = ParseDict(utils.process_data(data), self.metadata)
-        self.metadata.metadata.update(x_testbench_metadata)
-        self.metadata.metageneration = metageneration + 1
 
     def media_rest(self, request):
         instructions = request.headers.get("x-goog-testbench-instructions")
@@ -483,10 +415,7 @@ class Object:
     def __x_goog_hash_header(self):
         header = ""
         if "x_testbench_crc32c" in self.metadata.metadata:
-            header += "crc32c=" + hash_utils.base64_crc32c(self.metadata.crc32c.value)
+            header += "crc32c=" + self.metadata.metadata["x_testbench_crc32c"]
         if "x_testbench_md5" in self.metadata.metadata:
-            header += ",md5=" + str(self.metadata.md5_hash)
+            header += ",md5=" + self.metadata.metadata["x_testbench_mdd5"]
         return header if header != "" else None
-
-    def rewrite(self):
-        pass

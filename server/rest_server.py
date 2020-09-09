@@ -194,7 +194,7 @@ def bucket_default_object_acl_delete(bucket_name, entity):
 
 @gcs.route("/b/<bucket_name>/notificationConfigs")
 def bucket_notification_list(bucket_name):
-    bucket = db.BlockingIOErrorget_bucket(bucket_name, flask.request, None)
+    bucket = db.get_bucket(bucket_name, flask.request, None)
     result = resources.ListNotificationsResponse(items=bucket.notifications)
     return process.message_to_rest(
         result,
@@ -283,14 +283,14 @@ def objects_list(bucket_name):
 @gcs.route("/b/<bucket_name>/o/<path:object_name>", methods=["PUT"])
 def objects_update(bucket_name, object_name):
     obj = db.get_object(bucket_name, object_name, flask.request, False, None)
-    obj.update(flask.request.data)
+    obj.update(flask.request, None)
     return obj.to_rest(flask.request)
 
 
 @gcs.route("/b/<bucket_name>/o/<path:object_name>", methods=["PATCH"])
 def objects_patch(bucket_name, object_name):
     obj = db.get_object(bucket_name, object_name, flask.request, False, None)
-    obj.update(flask.request.data)
+    obj.patch(flask.request, None)
     return obj.to_rest(flask.request)
 
 
@@ -298,6 +298,9 @@ def objects_patch(bucket_name, object_name):
 def objects_delete(bucket_name, object_name):
     db.delete_object(bucket_name, object_name, flask.request, None)
     return ""
+
+
+# === OBJECT SPECIAL OPERATIONS === #
 
 
 @gcs.route("/b/<bucket_name>/o/<path:object_name>/compose", methods=["POST"])
@@ -385,6 +388,9 @@ def objects_rewrite(
     return gcs_rewrite.Rewrite.process_request(flask.request, context=None)
 
 
+# === OBJECT ACCESS CONTROL === #
+
+
 @gcs.route("/b/<bucket_name>/o/<path:object_name>/acl")
 def objects_acl_list(bucket_name, object_name):
     obj = db.get_object(bucket_name, object_name, flask.request, False, None)
@@ -400,39 +406,35 @@ def objects_acl_list(bucket_name, object_name):
 @gcs.route("/b/<bucket_name>/o/<path:object_name>/acl", methods=["POST"])
 def objects_acl_create(bucket_name, object_name):
     obj = db.get_object(bucket_name, object_name, flask.request, False, None)
-    acl = obj.insert_acl(flask.request.data)
+    acl = obj.insert_acl(flask.request, None)
     return process.message_to_rest(acl, constant.KIND_OBJECT_ACL)
 
 
 @gcs.route("/b/<bucket_name>/o/<path:object_name>/acl/<entity>")
 def objects_acl_get(bucket_name, object_name, entity):
     obj = db.get_object(bucket_name, object_name, flask.request, False, None)
-    acl, _ = obj.lookup_acl(entity)
+    acl = obj.get_acl(entity, None)
     return process.message_to_rest(acl, constant.KIND_OBJECT_ACL)
 
 
 @gcs.route("/b/<bucket_name>/o/<path:object_name>/acl/<entity>", methods=["PUT"])
 def objects_acl_update(bucket_name, object_name, entity):
     obj = db.get_object(bucket_name, object_name, flask.request, False, None)
-    role = json.loads(flask.request.data)["role"]
-    data = resources.ObjectAccessControl(entity=entity, role=role)
-    acl = obj.insert_acl(data, update=True)
+    acl = obj.update_acl(entity, flask.request, None)
     return process.message_to_rest(acl, constant.KIND_OBJECT_ACL)
 
 
 @gcs.route("/b/<bucket_name>/o/<path:object_name>/acl/<entity>", methods=["PATCH"])
 def objects_acl_patch(bucket_name, object_name, entity):
     obj = db.get_object(bucket_name, object_name, flask.request, False, None)
-    role = json.loads(flask.request.data)["role"]
-    data = resources.ObjectAccessControl(entity=entity, role=role)
-    acl = obj.insert_acl(data, update=True)
+    acl = obj.patch_acl(entity, flask.request, None)
     return process.message_to_rest(acl, constant.KIND_OBJECT_ACL)
 
 
 @gcs.route("/b/<bucket_name>/o/<path:object_name>/acl/<entity>", methods=["DELETE"])
 def objects_acl_delete(bucket_name, object_name, entity):
     obj = db.get_object(bucket_name, object_name, flask.request, False, None)
-    obj.delete_acl(entity)
+    obj.delete_acl(entity, None)
     return ""
 
 
@@ -456,7 +458,7 @@ def objects_insert(bucket_name):
         db.insert_upload(upload)
         return upload.to_rest()
     else:
-        obj = gcs_object.Object.init_rest(bucket_name, upload_type, flask.request)
+        obj = gcs_object.Object.init_json(bucket_name, upload_type, flask.request)
         db.check_object_generation(
             bucket_name, obj.metadata.name, flask.request, False, None
         )
@@ -470,7 +472,7 @@ def resumable_upload_chunk(bucket_name):
     upload_id = request.args.get("upload_id")
     if upload_id is None:
         error.abort(400, "Missing upload_id in resumable_upload_chunk", None)
-    upload = db.get_upload(upload_id)
+    upload = db.get_upload(upload_id, None)
     content_length = int(request.headers.get("content-length", 0))
     if content_length != len(request.data):
         error.abort(412, "content-length header is not invaild.", None)
@@ -487,7 +489,9 @@ def resumable_upload_chunk(bucket_name):
             else:
                 return upload.status_rest()
         if items[1] != "*":
-            x_upload_content_length = upload.headers.get("x-upload-content-length", 0)
+            x_upload_content_length = upload.request.headers.get(
+                "x-upload-content-length", 0
+            )
             if x_upload_content_length != 0 and x_upload_content_length != int(
                 items[1]
             ):
@@ -495,7 +499,7 @@ def resumable_upload_chunk(bucket_name):
                     400,
                     "X-Upload-Content-Length"
                     "validation failed. Expected=%d, got %d."
-                    % (x_upload_content_length, int(items[1])),
+                    % (int(x_upload_content_length), int(items[1])),
                 )
         upload.media += request.data
         upload.complete = (
@@ -503,18 +507,22 @@ def resumable_upload_chunk(bucket_name):
         )
         if upload.complete:
             db.check_object_generation(
-                upload.metadata.bucket, upload.metadata.name, request, False, None
+                upload.metadata.bucket,
+                upload.metadata.name,
+                upload.request,
+                False,
+                None,
             )
             obj = gcs_object.Object(upload.metadata, upload.media)
             if (
-                upload.headers.get("x-goog-testbench-instructions")
+                upload.request.headers.get("x-goog-testbench-instructions")
                 == "inject-upload-data-error"
             ):
                 obj.media = data_utils.corrupt_media(obj.media)
             db.insert_object(bucket_name, obj, None)
     if upload.complete:
         return db.get_object(
-            bucket_name, upload.metadata.name, request, False, None
+            bucket_name, upload.metadata.name, upload.request, False, None
         ).to_rest(request)
     else:
         return upload.status_rest()
@@ -525,7 +533,7 @@ def delete_resumable_upload(bucket_name):
     upload_id = flask.request.args.get("upload_id")
     if upload_id is None:
         error.abort(400, "Missing upload_id in delete_resumable_upload", None)
-    db.delete_upload(upload_id)
+    db.delete_upload(upload_id, None)
     return flask.make_response("", 499, {"content-length": 0})
 
 
@@ -577,7 +585,6 @@ xmlapi.debug = True
 
 @xmlapi.route("/<bucket_name>/<object_name>")
 def xmlapi_get_object(bucket_name, object_name):
-    """Implement the 'Objects: insert' API.  Insert a new GCS Object."""
     if flask.request.args.get("acl") is not None:
         error.abort(500, "ACL query not supported in XML API", None)
     if flask.request.args.get("encryption") is not None:
@@ -589,7 +596,8 @@ def xmlapi_get_object(bucket_name, object_name):
 @xmlapi.route("/<bucket_name>/<object_name>", methods=["PUT"])
 def xmlapi_put_object(bucket_name, object_name):
     db.insert_test_bucket()
-    gcs_object.Object.insert(bucket_name, flask.request, object_name)
+    obj = gcs_object.Object.init_xml(bucket_name, object_name, flask.request)
+    db.insert_object(bucket_name, obj, None)
     return ""
 
 

@@ -35,6 +35,14 @@ def base64_crc32c(value):
     return base64_int(crc32c.crc32(value))
 
 
+def debase64_crc32c(value):
+    return struct.unpack(">I", base64.b64decode(value.encode("utf-8")))[0]
+
+
+def debase64_md5(value):
+    return base64.b64decode(value.encode("utf-8")).decode("utf-8")
+
+
 def random_bigint(size=63):
     return random.getrandbits(size)
 

@@ -72,13 +72,6 @@ class StorageServicer(storage_pb2_grpc.StorageServicer):
                 upload = gcs_upload.Upload.init(
                     insert_object_spec.resource.bucket, insert_object_spec, context
                 )
-                db.check_object_generation(
-                    upload.metadata.bucket,
-                    upload.metadata.name,
-                    request.insert_object_spec,
-                    False,
-                    context,
-                )
             data = request.WhichOneof("data")
             checksummed_data = None
             if data == "checksummed_data":
@@ -87,6 +80,8 @@ class StorageServicer(storage_pb2_grpc.StorageServicer):
                 checksummed_data = self.GetObjectMedia(
                     data.reference, context
                 ).checksummed_data
+            else:
+                continue
             content = checksummed_data.content
             crc32c_hash = (
                 checksummed_data.crc32c.value
@@ -99,9 +94,21 @@ class StorageServicer(storage_pb2_grpc.StorageServicer):
             if request.finish_write:
                 upload.complete = True
                 break
-        if not upload.complete and not is_resumable:
-            error.abort(400, "Request does not set finish_write", context)
-        obj = gcs_object.Object(upload.metadata, upload.media)
+        if not upload.complete:
+            if not is_resumable:
+                error.abort(400, "Request does not set finish_write", context)
+            else:
+                return
+        db.check_object_generation(
+            upload.metadata.bucket,
+            upload.metadata.name,
+            upload.request,
+            False,
+            context,
+        )
+        obj = gcs_object.Object.init(
+            upload.metadata, upload.media, upload.request, content
+        )
         db.insert_object(obj.metadata.bucket, obj, context)
         return obj.metadata
 

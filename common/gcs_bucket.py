@@ -133,6 +133,16 @@ class Bucket:
             update_mask = request.update_mask
         else:
             data = json.loads(request.data)
+            if "labels" in data:
+                if data["labels"] is None:
+                    self.metadata.labels.clear()
+                else:
+                    for key, value in data["labels"].items():
+                        if value is None:
+                            self.metadata.labels.pop(key, None)
+                        else:
+                            self.metadata.labels[key] = value
+            data.pop("labels", None)
             data = self.__preprocess_metadata(data)
             metadata = ParseDict(data, resources.Bucket())
             paths = ",".join(data.keys())

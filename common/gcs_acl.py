@@ -75,11 +75,11 @@ def entity_email(entity):
 # BucketAccessControl
 
 
-def bucket_acl(bucket, role, context):
-    return bucket_entity_acl(bucket, None, role, context)
+def bucket_acl(bucket_name, role, context):
+    return bucket_entity_acl(bucket_name, None, role, context)
 
 
-def bucket_entity_acl(bucket, entity, role, context):
+def bucket_entity_acl(bucket_name, entity, role, context):
     acl = resources.BucketAccessControl()
     if role == "OWNER":
         acl.entity = project_entity("owners") if entity is None else entity
@@ -93,7 +93,7 @@ def bucket_entity_acl(bucket, entity, role, context):
     else:
         error.abort(412, "Role %s is invalid." % role, context)
     acl.role = role
-    acl.bucket = bucket
+    acl.bucket = bucket_name
     acl.entity_id = entity_id(acl.entity)
     acl.email = entity_email(acl.entity)
     acl.id = "%s/acl/%s" % (acl.bucket, acl.entity_id)
@@ -102,33 +102,33 @@ def bucket_entity_acl(bucket, entity, role, context):
     return acl
 
 
-def bucket_predefined_acls(bucket, predefined_acl, context):
+def bucket_predefined_acls(bucket_name, predefined_acl, context):
     acls = []
     if predefined_acl == "authenticatedRead" or predefined_acl == 1:
-        acls.append(bucket_acl(bucket, "OWNER", context))
+        acls.append(bucket_acl(bucket_name, "OWNER", context))
         acls.append(
-            bucket_entity_acl(bucket, "allAuthenticatedUsers", "READER", context)
+            bucket_entity_acl(bucket_name, "allAuthenticatedUsers", "READER", context)
         )
     elif predefined_acl == "private" or predefined_acl == 2:
-        acls.append(bucket_acl(bucket, "OWNER", context))
+        acls.append(bucket_acl(bucket_name, "OWNER", context))
     elif predefined_acl == "projectPrivate" or predefined_acl == 3:
-        acls.append(bucket_acl(bucket, "OWNER", context))
-        acls.append(bucket_acl(bucket, "READER", context))
-        acls.append(bucket_acl(bucket, "WRITER", context))
+        acls.append(bucket_acl(bucket_name, "OWNER", context))
+        acls.append(bucket_acl(bucket_name, "READER", context))
+        acls.append(bucket_acl(bucket_name, "WRITER", context))
     elif predefined_acl == "publicRead" or predefined_acl == 4:
-        acls.append(bucket_acl(bucket, "OWNER", context))
-        acls.append(bucket_entity_acl(bucket, "allUsers", "READER", context))
+        acls.append(bucket_acl(bucket_name, "OWNER", context))
+        acls.append(bucket_entity_acl(bucket_name, "allUsers", "READER", context))
     elif predefined_acl == "publicReadWrite" or predefined_acl == 5:
-        acls.append(bucket_acl(bucket, "OWNER", context))
-        acls.append(bucket_entity_acl(bucket, "allUsers", "WRITER", context))
+        acls.append(bucket_acl(bucket_name, "OWNER", context))
+        acls.append(bucket_entity_acl(bucket_name, "allUsers", "WRITER", context))
     return acls
 
 
-def bucket_project_doacl(bucket, role, context):
-    return bucket_entity_doacl(bucket, None, role, context)
+def bucket_project_doacl(bucket_name, role, context):
+    return bucket_entity_doacl(bucket_name, None, role, context)
 
 
-def bucket_object_doacl(bucket, role, context):
+def bucket_object_doacl(bucket_name, role, context):
     team = ""
     if role == "OWNER":
         team = "owners"
@@ -138,10 +138,10 @@ def bucket_object_doacl(bucket, role, context):
         team = "editors"
     else:
         error.abort(412, 412, "Role %s is invalid." % role, context)
-    return bucket_entity_doacl(bucket, object_entity(team), role, context)
+    return bucket_entity_doacl(bucket_name, object_entity(team), role, context)
 
 
-def bucket_entity_doacl(bucket, entity, role, context):
+def bucket_entity_doacl(bucket_name, entity, role, context):
     acl = resources.ObjectAccessControl()
     if role == "OWNER":
         acl.entity = project_entity("owners") if entity is None else entity
@@ -154,33 +154,154 @@ def bucket_entity_doacl(bucket, entity, role, context):
     acl.role = role
     acl.entity_id = entity_id(acl.entity)
     acl.email = entity_email(acl.entity)
-    acl.etag = "%s/acl/%s" % (bucket, acl.entity_id)
+    acl.etag = "%s/acl/%s" % (bucket_name, acl.entity_id)
     acl.project_team.project_number = PROJECT_ID
     return acl
 
 
-def bucket_predefined_doacls(bucket, predefined_doacl, context):
+def bucket_predefined_doacls(bucket_name, predefined_doacl, context):
     acls = []
     if predefined_doacl == "authenticatedRead" or predefined_doacl == 1:
-        acls.append(bucket_object_doacl(bucket, "OWNER", context))
+        acls.append(bucket_object_doacl(bucket_name, "OWNER", context))
         acls.append(
-            bucket_entity_doacl(bucket, "allAuthenticatedUsers", "READER", context)
+            bucket_entity_doacl(bucket_name, "allAuthenticatedUsers", "READER", context)
         )
     elif predefined_doacl == "bucketOwnerFullControl" or predefined_doacl == 2:
-        acls.append(bucket_object_doacl(bucket, "OWNER", context))
-        acls.append(bucket_project_doacl(bucket, "OWNER", context))
+        acls.append(bucket_object_doacl(bucket_name, "OWNER", context))
+        acls.append(bucket_project_doacl(bucket_name, "OWNER", context))
     elif predefined_doacl == "bucketOwnerRead" or predefined_doacl == 3:
-        acls.append(bucket_object_doacl(bucket, "OWNER", context))
+        acls.append(bucket_object_doacl(bucket_name, "OWNER", context))
         acls.append(
-            bucket_entity_doacl(bucket, project_entity("owners"), "READER", context)
+            bucket_entity_doacl(
+                bucket_name, project_entity("owners"), "READER", context
+            )
         )
     elif predefined_doacl == "private" or predefined_doacl == 4:
-        acls.append(bucket_object_doacl(bucket, "OWNER", context))
+        acls.append(bucket_object_doacl(bucket_name, "OWNER", context))
     elif predefined_doacl == "projectPrivate" or predefined_doacl == 5:
-        acls.append(bucket_object_doacl(bucket, "OWNER", context))
-        acls.append(bucket_project_doacl(bucket, "OWNER", context))
-        acls.append(bucket_project_doacl(bucket, "READER", context))
+        acls.append(bucket_object_doacl(bucket_name, "OWNER", context))
+        acls.append(bucket_project_doacl(bucket_name, "OWNER", context))
+        acls.append(bucket_project_doacl(bucket_name, "READER", context))
     elif predefined_doacl == "publicRead" or predefined_doacl == 6:
-        acls.append(bucket_object_doacl(bucket, "OWNER", context))
-        acls.append(bucket_entity_doacl(bucket, "allUsers", "READER", context))
+        acls.append(bucket_object_doacl(bucket_name, "OWNER", context))
+        acls.append(bucket_entity_doacl(bucket_name, "allUsers", "READER", context))
+    return acls
+
+
+# === OBJECT ACCESS CONTROL === #
+
+
+def object_entity_acl(bucket_name, object_name, generation, entity, role, context):
+    acl = resources.ObjectAccessControl()
+    if role == "OWNER":
+        acl.entity = project_entity("owners") if entity is None else entity
+        acl.project_team.team = "owners"
+    elif role == "READER":
+        acl.entity = project_entity("viewers") if entity is None else entity
+        acl.project_team.team = "viewers"
+    else:
+        error.abort(412, "Role %s is invalid." % role, context)
+    acl.bucket = bucket_name
+    acl.email = entity_email(acl.entity)
+    acl.entity_id = entity_id(acl.entity)
+    acl.etag = "%s/o/%s#%d/acl/%s" % (
+        bucket_name,
+        object_name,
+        generation,
+        acl.entity_id,
+    )
+    acl.generation = generation
+    acl.id = acl.etag
+    acl.object = object_name
+    acl.project_team.project_number = PROJECT_ID
+    acl.role = role
+    return acl
+
+
+def object_project_acl(bucket_name, object_name, generation, role, context):
+    return object_entity_acl(bucket_name, object_name, generation, None, role, context)
+
+
+def object_object_acl(bucket_name, object_name, generation, role, context):
+    team = ""
+    if role == "OWNER":
+        team = "owners"
+    elif role == "READER":
+        team = "viewers"
+    elif role == "WRITER":
+        team = "editors"
+    else:
+        error.abort(412, 412, "Role %s is invalid." % role, context)
+    return object_entity_acl(
+        bucket_name, object_name, generation, object_entity(team), role, context
+    )
+
+
+def object_predefined_acls(
+    bucket_name, object_name, generation, predefined_acl, context
+):
+    acls = []
+    if predefined_acl == "authenticatedRead" or predefined_acl == 1:
+        acls.append(
+            object_object_acl(bucket_name, object_name, generation, "OWNER", context)
+        )
+        acls.append(
+            object_entity_acl(
+                bucket_name,
+                object_name,
+                generation,
+                "allAuthenticatedUsers",
+                "READER",
+                context,
+            )
+        )
+    elif predefined_acl == "bucketOwnerFullControl" or predefined_acl == 2:
+        acls.append(
+            object_object_acl(bucket_name, object_name, generation, "OWNER", context)
+        )
+        acls.append(
+            object_project_acl(bucket_name, object_name, generation, "OWNER", context)
+        )
+    elif predefined_acl == "bucketOwnerRead" or predefined_acl == 3:
+        acls.append(
+            object_object_acl(bucket_name, object_name, generation, "OWNER", context)
+        )
+        acls.append(
+            object_entity_acl(
+                bucket_name,
+                object_name,
+                generation,
+                project_entity("owners"),
+                "READER",
+                context,
+            )
+        )
+    elif predefined_acl == "private" or predefined_acl == 4:
+        acls.append(
+            object_object_acl(bucket_name, object_name, generation, "OWNER", context)
+        )
+    elif predefined_acl == "projectPrivate" or predefined_acl == 5:
+        acls.append(
+            object_object_acl(bucket_name, object_name, generation, "OWNER", context)
+        )
+        acls.append(
+            object_object_acl(bucket_name, object_name, generation, "OWNER", context)
+        )
+        acls.append(
+            object_object_acl(bucket_name, object_name, generation, "READER", context)
+        )
+    elif predefined_acl == "publicRead" or predefined_acl == 6:
+        acls.append(
+            object_object_acl(bucket_name, object_name, generation, "OWNER", context)
+        )
+        acls.append(
+            object_entity_acl(
+                bucket_name,
+                object_name,
+                generation,
+                "allUsers",
+                "READER",
+                context,
+            )
+        )
     return acls
