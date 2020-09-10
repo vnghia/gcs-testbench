@@ -462,10 +462,7 @@ def objects_insert(bucket_name):
         obj = gcs_object.Object.init_media(bucket_name, flask.request)
     elif upload_type == "multipart":
         obj = gcs_object.Object.init_multipart(bucket_name, flask.request)
-    db.check_object_generation(
-        bucket_name, obj.metadata.name, flask.request, False, None
-    )
-    db.insert_object(bucket_name, obj, None)
+    db.insert_object(bucket_name, obj, flask.request, None)
     return obj.to_rest(flask.request)
 
 
@@ -484,13 +481,6 @@ def resumable_upload_chunk(bucket_name):
         items = list(constant.content_range_split.match(content_range).groups())
         if len(items) != 2 or (items[0] == items[1] and items[0] != "*"):
             error.abort(400, "Invalid Content-Range in upload %s" % content_range)
-        if items[0] == "*":
-            if upload.complete:
-                return db.get_object(
-                    bucket_name, upload.metadata.name, request, False, None
-                ).to_rest(request)
-            else:
-                return upload.status_rest()
         if items[1] != "*":
             x_upload_content_length = upload.request.headers.get(
                 "x-upload-content-length", 0
@@ -503,33 +493,38 @@ def resumable_upload_chunk(bucket_name):
                     "X-Upload-Content-Length"
                     "validation failed. Expected=%d, got %d."
                     % (int(x_upload_content_length), int(items[1])),
+                    None,
                 )
+            upload.complete = int(items[1]) == len(upload.media)
+            if upload.complete:
+                obj = gcs_object.Object.init(
+                    upload.metadata, upload.media, upload.request, None
+                )
+                obj.metadata.metadata["x_testbench_upload"] = "resumable"
+                db.insert_object(bucket_name, obj, upload.request, None)
+                return obj.to_rest(upload.request)
+        if items[0] == "*":
+            if upload.complete:
+                return db.get_object(
+                    bucket_name, upload.metadata.name, request, False, None
+                ).to_rest(upload.request)
+            else:
+                return upload.status_rest()
         upload.media += request.data
         upload.complete = (
             len(upload.media) == int(items[1]) if items[1] != "*" else False
         )
         if upload.complete:
-            db.check_object_generation(
-                upload.metadata.bucket,
-                upload.metadata.name,
-                upload.request,
-                False,
-                None,
-            )
-            if (
-                upload.request.headers.get("x-goog-testbench-instructions")
-                == "inject-upload-data-error"
-            ):
-                upload.media = data_utils.corrupt_media(upload.media)
             obj = gcs_object.Object.init(
                 upload.metadata, upload.media, upload.request, None
             )
-            db.insert_object(bucket_name, obj, None)
-            return obj.to_rest(request)
+            obj.metadata.metadata["x_testbench_upload"] = "resumable"
+            db.insert_object(bucket_name, obj, upload.request, None)
+            return obj.to_rest(upload.request)
     if upload.complete:
         return db.get_object(
             bucket_name, upload.metadata.name, upload.request, False, None
-        ).to_rest(request)
+        ).to_rest(upload.request)
     else:
         return upload.status_rest()
 
@@ -603,8 +598,7 @@ def xmlapi_get_object(bucket_name, object_name):
 def xmlapi_put_object(bucket_name, object_name):
     db.insert_test_bucket()
     obj, request = gcs_object.Object.init_xml(bucket_name, object_name, flask.request)
-    db.check_object_generation(bucket_name, obj.metadata.name, request, False, None)
-    db.insert_object(bucket_name, obj, None)
+    db.insert_object(bucket_name, obj, flask.request, None)
     return ""
 
 

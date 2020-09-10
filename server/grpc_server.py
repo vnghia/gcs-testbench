@@ -99,17 +99,10 @@ class StorageServicer(storage_pb2_grpc.StorageServicer):
                 error.abort(400, "Request does not set finish_write", context)
             else:
                 return
-        db.check_object_generation(
-            upload.metadata.bucket,
-            upload.metadata.name,
-            upload.request,
-            False,
-            context,
-        )
         obj = gcs_object.Object.init(
             upload.metadata, upload.media, upload.request, content
         )
-        db.insert_object(obj.metadata.bucket, obj, context)
+        db.insert_object(obj.metadata.bucket, obj, upload.request, context)
         return obj.metadata
 
     def GetObjectMedia(self, request, context):

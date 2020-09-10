@@ -22,6 +22,18 @@ class FakeRequest:
         self.headers = headers
         self.data = data
 
+    def HasField(self, field):
+        return field in [
+            "if_metageneration_match",
+            "if_source_metageneration_match",
+            "if_metageneration_not_match",
+            "if_source_metageneration_not_match",
+            "if_generation_match",
+            "if_source_generation_match",
+            "if_generation_not_match",
+            "if_source_generation_not_match",
+        ]
+
 
 def parse_multipart(request):
     content_type = request.headers.get("content-type")

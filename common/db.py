@@ -187,7 +187,10 @@ class Database:
                 )
         return obj
 
-    def insert_object(self, bucket_name, obj, context):
+    def insert_object(self, bucket_name, obj, request, context):
+        self.check_object_generation(
+            bucket_name, obj.metadata.name, request, False, context
+        )
         bucket = self.__get_bucket_object(bucket_name, context)
         name = obj.metadata.name
         generation = obj.metadata.generation
