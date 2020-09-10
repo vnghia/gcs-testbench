@@ -14,13 +14,12 @@
 
 from common import error
 import json
+from types import SimpleNamespace
 
 
-class FakeRequest:
-    def __init__(self, args, headers, data):
-        self.args = args
-        self.headers = headers
-        self.data = data
+class FakeRequest(SimpleNamespace):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
 
     def HasField(self, field):
         return field in [

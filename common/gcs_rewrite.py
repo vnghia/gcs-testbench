@@ -16,34 +16,29 @@ from google.protobuf.json_format import ParseDict
 
 import storage_pb2 as storage
 import utils
-from common import gcs_object, hash_utils, process
+from common import gcs_object, hash_utils, process, rest_utils
 
 
 class Rewrite:
     def __init__(
         self,
+        src_bucket_name,
+        src_object_name,
+        dst_bucket_name,
+        dst_object_name,
+        rewrite_token,
+        media,
+        max_bytes_rewritten_per_call,
         request,
-        context,
     ):
-        if isinstance(request, storage.RewriteObjectRequest):
-            self.request = request
-        else:
-            self.request = ParseDict(request.args, storage.RewriteObjectRequest())
-        self.status = storage.RewriteResponse(
-            rewrite_token=hash_utils.compute_md5(
-                (
-                    self.request.source_bucket
-                    + "/"
-                    + self.request.source_object
-                    + "to"
-                    + self.request.destination_bucket
-                    + "/"
-                    + self.request.destination_object
-                ).encode("utf-8")
-            )
-        )
-        self.media = b""
-        utils.insert_rewrite(self)
+        self.src_bucket_name = src_bucket_name
+        self.src_object_name = src_object_name
+        self.dst_bucket_name = dst_bucket_name
+        self.dst_object_name = dst_object_name
+        self.rewrite_token = rewrite_token
+        self.media = media
+        self.max_bytes_rewritten_per_call = max_bytes_rewritten_per_call
+        self.request = request
 
     def to_rest(self, request, fields=None):
         return process.message_to_rest(
@@ -53,48 +48,44 @@ class Rewrite:
         )
 
     @classmethod
-    def process_request(cls, request, context):
-        token = request.args.get("rewriteToken")
-        rewrite = (
-            utils.lookup_rewrite(token) if token is not None else Rewrite(request, None)
-        )
-        source = gcs_object.Object.lookup(
-            rewrite.request.source_bucket,
-            rewrite.request.source_object,
-            request.args,
-            True,
-            context,
-        )
-        total_bytes_rewritten = rewrite.status.total_bytes_rewritten
-        total_bytes_rewritten += (
-            1024 * 1024
-            if 1024 * 1024 <= len(source.media) - total_bytes_rewritten
-            else len(source.media) - total_bytes_rewritten
-        )
-        rewrite.status.object_size = len(source.media)
-        rewrite.media += source.media[
-            (rewrite.status.total_bytes_rewritten) : total_bytes_rewritten
-        ]
-        rewrite.status.total_bytes_rewritten = len(rewrite.media)
-        if total_bytes_rewritten == len(source.media):
-            utils.check_object_generation(
-                rewrite.request.destination_bucket,
-                rewrite.request.destination_object,
-                request.args,
+    def init(
+        cls,
+        src_bucket_name,
+        src_object_name,
+        dst_bucket_name,
+        dst_object_name,
+        request,
+        context,
+    ):
+        fake_request, max_bytes_rewritten_per_call = None, 1024 * 1024
+        if context is not None:
+            pass
+        else:
+            fake_request = rest_utils.FakeRequest(
+                args=request.args.to_dict(), headers={}, data=request.data
             )
-            destination_metadata = source.metadata
-            destination_metadata.bucket = rewrite.request.destination_bucket
-            destination_metadata.name = rewrite.request.destination_object
-            destination_obj = gcs_object.Object(
-                destination_metadata,
-                source.media,
-                request.args,
-                request.headers,
+            max_bytes_rewritten_per_call = min(
+                int(fake_request.args.get("maxBytesRewrittenPerCall", 1024 * 1024)),
+                1024 * 1024,
             )
-            destination_obj.update(request.data)
-            rewrite.status.object_size = rewrite.status.total_bytes_rewritten
-            rewrite.status.done = True
-            rewrite.status.rewrite_token = ""
-            rewrite.status.resource.MergeFrom(destination_obj.metadata)
-        result = rewrite.to_rest(request)
-        return result
+        rewrite_token = hash_utils.base64_md5(
+            (
+                "%s/o/%s/rewriteTo/b/%s/o/%s"
+                % (
+                    src_bucket_name,
+                    src_object_name,
+                    dst_bucket_name,
+                    dst_object_name,
+                )
+            ).encode("utf-8")
+        )
+        return Rewrite(
+            src_bucket_name,
+            src_object_name,
+            dst_bucket_name,
+            dst_object_name,
+            rewrite_token,
+            b"",
+            max_bytes_rewritten_per_call,
+            fake_request,
+        )

@@ -67,7 +67,9 @@ class Upload:
                 for key, value in request.headers.items()
                 if key.lower().startswith("x-")
             }
-            request = rest_utils.FakeRequest(request.args.to_dict(), headers, b"")
+            request = rest_utils.FakeRequest(
+                args=request.args.to_dict(), headers=headers, data=b""
+            )
         if metadata.name == "":
             error.abort(400, "Missing object name argument", context)
         metadata.bucket = bucket_name

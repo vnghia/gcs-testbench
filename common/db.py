@@ -127,7 +127,9 @@ class Database:
         for obj in bucket.values():
             generation = obj.metadata.generation
             name = obj.metadata.name
-            if not versions and generation != self.live_generations[bucket_name][name]:
+            if not versions and generation != self.live_generations[bucket_name].get(
+                name
+            ):
                 continue
             if name.find(prefix) != 0:
                 continue
@@ -229,7 +231,7 @@ class Database:
         return rewrite
 
     def insert_rewrite(self, rewrite):
-        self.rewrites[rewrite.token] = rewrite
+        self.rewrites[rewrite.rewrite_token] = rewrite
 
     def delete_rewrite(self, token, context):
         self.get_rewrite(token, context)

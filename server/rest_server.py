@@ -30,7 +30,7 @@ from common import (
     gcs_upload,
     process,
     error,
-    data_utils,
+    rest_utils,
 )
 
 db = None
@@ -305,7 +305,7 @@ def objects_delete(bucket_name, object_name):
 
 @gcs.route("/b/<bucket_name>/o/<path:object_name>/compose", methods=["POST"])
 def objects_compose(bucket_name, object_name):
-    payload = process.process_data(flask.request.data)
+    payload = json.loads(flask.request.data)
     source_objects = payload["sourceObjects"]
     if source_objects is None:
         error.abort(400, "You must provide at least one source component.", None)
@@ -320,72 +320,112 @@ def objects_compose(bucket_name, object_name):
     for source_object in source_objects:
         source_object_name = source_object.get("name")
         if source_object_name is None:
-            error.abort(400, "Required.", None)
-        generation = source_object.get("generation")
+            error.abort(400, "Name of source compose object is required.", None)
+        generation = source_object.get("generation", None)
         if_generation_match = (
             source_object.get("objectPreconditions").get("ifGenerationMatch")
             if source_object.get("objectPreconditions") is not None
             else None
         )
-        obj = gcs_object.Object.lookup(
-            bucket_name,
-            source_object_name,
-            {
-                "generation": generation,
-                "ifGenerationMatch": if_generation_match,
-            },
+        fake_request = rest_utils.FakeRequest(args=dict())
+        if generation is not None:
+            fake_request.args["generation"] = generation
+        if if_generation_match is not None:
+            fake_request.args["ifGenerationMatch"] = if_generation_match
+        source_object = db.get_object(
+            bucket_name, source_object_name, fake_request, False, None
         )
-        composed_media += obj.media
+        composed_media += source_object.media
     metadata = {"name": object_name, "bucket": bucket_name}
     metadata.update(payload.get("destination", {}))
-    composed_object = gcs_object.Object(
-        metadata,
-        composed_media,
-        flask.request.args,
-        flask.request.headers,
+    composed_object = gcs_object.Object.init_dict(
+        metadata, composed_media, True, flask.request
     )
+    db.insert_object(bucket_name, composed_object, flask.request, None)
     return composed_object.to_rest(flask.request)
 
 
 @gcs.route(
-    "/b/<source_bucket>/o/<path:source_object>/copyTo/b/<destination_bucket>/o/<path:destination_object>",
+    "/b/<src_bucket_name>/o/<path:src_object_name>/copyTo/b/<dst_bucket_name>/o/<path:dst_object_name>",
     methods=["POST"],
 )
-def objects_copy(source_bucket, source_object, destination_bucket, destination_object):
-    source_obj = gcs_object.Object.lookup(
-        source_bucket, source_object, flask.request.args, True
+def objects_copy(src_bucket_name, src_object_name, dst_bucket_name, dst_object_name):
+    db.insert_test_bucket()
+    src_object = db.get_object(
+        src_bucket_name, src_object_name, flask.request, True, None
     )
-    db.check_object_generation(
-        destination_bucket, destination_object, flask.request, False, None
+    dst_metadata = resources.Object()
+    dst_metadata.CopyFrom(src_object.metadata)
+    dst_metadata.bucket = dst_bucket_name
+    dst_metadata.name = dst_object_name
+    dst_media = b""
+    dst_media += src_object.media
+    dst_object = gcs_object.Object.init(
+        dst_metadata, dst_media, flask.request, True, None
     )
-    destination_metadata = source_obj.metadata
-    destination_metadata.bucket = destination_bucket
-    destination_metadata.name = destination_object
-    destination_obj = gcs_object.Object(
-        destination_metadata,
-        source_obj.media,
-        flask.request.args,
-        flask.request.headers,
+    db.insert_object(dst_bucket_name, dst_object, flask.request, None)
+    dst_object.patch(flask.request, None)
+    dst_object.metadata.metageneration = 1
+    dst_object.metadata.updated.FromDatetime(
+        dst_object.metadata.time_created.ToDatetime()
     )
-    destination_obj.update(flask.request.data)
-    return destination_obj.to_rest(flask.request)
+    return dst_object.to_rest(flask.request)
 
 
 @gcs.route(
-    "/b/<source_bucket>/o/<path:source_object>/rewriteTo/b/<destination_bucket>/o/<path:destination_object>",
+    "/b/<src_bucket_name>/o/<path:src_object_name>/rewriteTo/b/<dst_bucket_name>/o/<path:dst_object_name>",
     methods=["POST"],
 )
-def objects_rewrite(
-    source_bucket, source_object, destination_bucket, destination_object
-):
+def objects_rewrite(src_bucket_name, src_object_name, dst_bucket_name, dst_object_name):
     db.insert_test_bucket()
-    args = dict(flask.request.args)
-    args["sourceBucket"] = source_bucket
-    args["sourceObject"] = source_object
-    args["destinationBucket"] = destination_bucket
-    args["destinationObject"] = destination_object
-    flask.request.args = args
-    return gcs_rewrite.Rewrite.process_request(flask.request, context=None)
+    rewrite_token, rewrite = flask.request.args.get("rewriteToken"), None
+    src_object = None
+    if rewrite_token is None:
+        rewrite = gcs_rewrite.Rewrite.init(
+            src_bucket_name,
+            src_object_name,
+            dst_bucket_name,
+            dst_object_name,
+            flask.request,
+            None,
+        )
+        db.insert_rewrite(rewrite)
+    else:
+        rewrite = db.get_rewrite(rewrite_token, None)
+    src_object = db.get_object(
+        src_bucket_name, src_object_name, rewrite.request, True, None
+    )
+    total_bytes_rewritten = len(rewrite.media)
+    total_bytes_rewritten += min(
+        rewrite.max_bytes_rewritten_per_call, len(src_object.media) - len(rewrite.media)
+    )
+    rewrite.media += src_object.media[len(rewrite.media) : total_bytes_rewritten]
+    done, dst_object = total_bytes_rewritten == len(src_object.media), None
+    response = {
+        "kind": "storage#rewriteResponse",
+        "totalBytesRewritten": len(rewrite.media),
+        "objectSize": len(src_object.media),
+        "done": done,
+    }
+    if done:
+        dst_metadata = resources.Object()
+        dst_metadata.CopyFrom(src_object.metadata)
+        dst_metadata.bucket = dst_bucket_name
+        dst_metadata.name = dst_object_name
+        dst_media = rewrite.media
+        dst_object = gcs_object.Object.init(
+            dst_metadata, dst_media, flask.request, True, None
+        )
+        db.insert_object(dst_bucket_name, dst_object, flask.request, None)
+        dst_object.patch(flask.request, None)
+        dst_object.metadata.metageneration = 1
+        dst_object.metadata.updated.FromDatetime(
+            dst_object.metadata.time_created.ToDatetime()
+        )
+        response["resource"] = dst_object.to_rest(rewrite.request)
+    else:
+        response["rewriteToken"] = rewrite.rewrite_token
+    return response
 
 
 # === OBJECT ACCESS CONTROL === #
@@ -485,12 +525,12 @@ def resumable_upload_chunk(bucket_name):
             x_upload_content_length = upload.request.headers.get(
                 "x-upload-content-length", 0
             )
-            if x_upload_content_length != 0 and x_upload_content_length != int(
-                items[1]
-            ):
+            if int(x_upload_content_length) != 0 and int(
+                x_upload_content_length
+            ) != int(items[1]):
                 error.abort(
                     400,
-                    "X-Upload-Content-Length"
+                    "X-Upload-Content-Length "
                     "validation failed. Expected=%d, got %d."
                     % (int(x_upload_content_length), int(items[1])),
                     None,
@@ -498,7 +538,7 @@ def resumable_upload_chunk(bucket_name):
             upload.complete = int(items[1]) == len(upload.media)
             if upload.complete:
                 obj = gcs_object.Object.init(
-                    upload.metadata, upload.media, upload.request, None
+                    upload.metadata, upload.media, upload.request, False, None
                 )
                 obj.metadata.metadata["x_testbench_upload"] = "resumable"
                 db.insert_object(bucket_name, obj, upload.request, None)
@@ -516,7 +556,7 @@ def resumable_upload_chunk(bucket_name):
         )
         if upload.complete:
             obj = gcs_object.Object.init(
-                upload.metadata, upload.media, upload.request, None
+                upload.metadata, upload.media, upload.request, False, None
             )
             obj.metadata.metadata["x_testbench_upload"] = "resumable"
             db.insert_object(bucket_name, obj, upload.request, None)
@@ -598,7 +638,7 @@ def xmlapi_get_object(bucket_name, object_name):
 def xmlapi_put_object(bucket_name, object_name):
     db.insert_test_bucket()
     obj, request = gcs_object.Object.init_xml(bucket_name, object_name, flask.request)
-    db.insert_object(bucket_name, obj, flask.request, None)
+    db.insert_object(bucket_name, obj, request, None)
     return ""
 
 

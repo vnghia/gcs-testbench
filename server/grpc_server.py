@@ -100,7 +100,7 @@ class StorageServicer(storage_pb2_grpc.StorageServicer):
             else:
                 return
         obj = gcs_object.Object.init(
-            upload.metadata, upload.media, upload.request, content
+            upload.metadata, upload.media, upload.request, False, context
         )
         db.insert_object(obj.metadata.bucket, obj, upload.request, context)
         return obj.metadata

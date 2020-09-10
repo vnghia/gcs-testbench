@@ -22,12 +22,7 @@ from google.protobuf.json_format import ParseDict
 
 import storage_resources_pb2 as resources
 import utils
-from common import (
-    error,
-    hash_utils,
-    rest_utils,
-    gcs_acl,
-)
+from common import data_utils, error, gcs_acl, hash_utils, process, rest_utils
 from google.protobuf.field_mask_pb2 import FieldMask
 
 
@@ -39,8 +34,12 @@ class Object:
     # === OBJECT === #
 
     @classmethod
-    def __update_predefined_acl(cls, request, metadata, set_default, context):
-        predefined_acl = gcs_acl.extract_predefined_acl(request, False, context)
+    def __update_predefined_acl(
+        cls, request, metadata, set_default, is_destination, context
+    ):
+        predefined_acl = gcs_acl.extract_predefined_acl(
+            request, is_destination, context
+        )
         if predefined_acl == "" or predefined_acl == 0:
             if set_default:
                 predefined_acl = "private"
@@ -51,13 +50,13 @@ class Object:
             cls.__upsert_acl(metadata, acl, None, False, context)
 
     @classmethod
-    def init(cls, metadata, media, request, context):
+    def init(cls, metadata, media, request, is_destination, context):
         if (
             context is None
             and request.headers.get("x-goog-testbench-instructions")
             == "inject-upload-data-error"
         ):
-            media = utils.corrupt_media(media)
+            media = data_utils.corrupt_media(media)
         timestamp = datetime.datetime.now(datetime.timezone.utc)
         metadata.generation = hash_utils.random_bigint()
         metadata.metageneration = 1
@@ -89,8 +88,13 @@ class Object:
         metadata.updated.FromDatetime(timestamp)
         metadata.owner.entity = gcs_acl.object_entity("owners")
         metadata.owner.entity_id = gcs_acl.entity_id(metadata.owner.entity)
-        cls.__update_predefined_acl(request, metadata, True, context)
+        cls.__update_predefined_acl(request, metadata, True, is_destination, context)
         return Object(metadata, media)
+
+    @classmethod
+    def init_dict(cls, metadata_dict, media, is_destination, request):
+        metadata = ParseDict(metadata_dict, resources.Object())
+        return cls.init(metadata, media, request, is_destination, None)
 
     @classmethod
     def init_multipart(cls, bucket_name, request):
@@ -126,7 +130,7 @@ class Object:
             metadata["metadata"]["x_testbench_crc32c"] = metadata["crc32c"]
             metadata["crc32c"] = hash_utils.debase64_crc32c(metadata["crc32c"])
         metadata.update(utils.extract_encryption(request))
-        return cls.init(ParseDict(metadata, resources.Object()), media, request, None)
+        return cls.init_dict(metadata, media, False, request)
 
     @classmethod
     def init_media(cls, bucket_name, request):
@@ -134,30 +138,24 @@ class Object:
         media = request.data
         if object_name is None:
             error.abort(412, "name not set in Objects: insert", None)
-        metadata = ParseDict(
-            {
-                "bucket": bucket_name,
-                "name": object_name,
-                "metadata": {"x_testbench_upload": "simple"},
-            },
-            resources.Object(),
-        )
-        return cls.init(metadata, media, request, None)
+        metadata = {
+            "bucket": bucket_name,
+            "name": object_name,
+            "metadata": {"x_testbench_upload": "simple"},
+        }
+        return cls.init_dict(metadata, media, False, request)
 
     @classmethod
     def init_xml(cls, bucket_name, object_name, request):
         media = request.data
-        metadata = ParseDict(
-            {
-                "bucket": bucket_name,
-                "name": object_name,
-                "metadata": {"x_testbench_upload": "xml"},
-            },
-            resources.Object(),
-        )
+        metadata = {
+            "bucket": bucket_name,
+            "name": object_name,
+            "metadata": {"x_testbench_upload": "xml"},
+        }
         if "content-type" in request.headers:
-            metadata.content_type = request.headers["content-type"]
-        fake_request = rest_utils.FakeRequest({}, None, None)
+            metadata["contentType"] = request.headers["content-type"]
+        fake_request = rest_utils.FakeRequest(args=request.args.to_dict())
         fake_request.headers = {
             key.lower(): value
             for key, value in request.headers.items()
@@ -169,11 +167,11 @@ class Object:
             for checksum in x_goog_hash.split(","):
                 if checksum.startswith("md5="):
                     md5Hash = checksum[4:]
-                    metadata.md5_hash = md5Hash
+                    metadata["md5Hash"] = md5Hash
                 if checksum.startswith("crc32c="):
                     crc32c_value = checksum[7:]
-                    metadata.crc32c.value = hash_utils.debase64_crc32c(crc32c_value)
-        return cls.init(metadata, media, fake_request, None), fake_request
+                    metadata["crc32c"] = hash_utils.debase64_crc32c(crc32c_value)
+        return cls.init_dict(metadata, media, False, fake_request), fake_request
 
     @classmethod
     def __update_metadata(cls, source, destination, update_mask):
@@ -208,7 +206,7 @@ class Object:
             update_mask.FromJsonString(paths)
             metadata = ParseDict(data, resources.Object())
         self.__update_metadata(metadata, self.metadata, update_mask)
-        self.__update_predefined_acl(request, self.metadata, False, context)
+        self.__update_predefined_acl(request, self.metadata, False, False, context)
 
     def update(self, request, context):
         metadata = (
@@ -237,7 +235,7 @@ class Object:
             ]
         )
         self.__update_metadata(metadata, self.metadata, update_mask)
-        self.__update_predefined_acl(request, self.metadata, False, context)
+        self.__update_predefined_acl(request, self.metadata, False, False, context)
 
     # === OBJECT ACL === #
 
@@ -331,7 +329,7 @@ class Object:
         if b"acl" in request.data:
             projection = "full"
         projection = request.args.get("projection", projection)
-        result = utils.message_to_rest(
+        result = process.message_to_rest(
             self.metadata,
             "storage#object",
             request.args.get("fields", fields),
@@ -366,7 +364,7 @@ class Object:
         response_stream = streamer
 
         if instructions == "return-corrupted-data":
-            media = utils.corrupt_media(self.media[begin:end])
+            media = data_utils.corrupt_media(self.media[begin:end])
 
             def streamer():
                 return media
