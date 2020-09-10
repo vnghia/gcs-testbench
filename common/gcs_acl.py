@@ -17,7 +17,7 @@ import os
 import storage_resources_pb2 as resources
 from common import error
 
-PROJECT_ID = os.getenv("GOOGLE_CLOUD_CPP_STORAGE_TEST_PROJECT_ID", "123456789")
+PROJECT_NUMBER = os.getenv("GOOGLE_CLOUD_CPP_STORAGE_TEST_PROJECT_ID", "123456789")
 
 
 # Extract
@@ -48,18 +48,30 @@ def extract_predefined_doacl(request, context):
 
 
 def project_entity(team):
-    return "project-%s-%s" % (team, PROJECT_ID)
+    return "project-%s-%s" % (team, PROJECT_NUMBER)
 
 
 def object_entity(team):
-    return "object-%s-%s" % (team, PROJECT_ID)
+    return "object-%s-%s" % (team, PROJECT_NUMBER)
+
+
+def canonical_entity(entity):
+    if entity == "allUsers" or entity == "allAuthenticatedUsers":
+        return entity
+    if entity.startswith("project-owners-"):
+        entity = "project-owners-%s" % PROJECT_NUMBER
+    if entity.startswith("project-editors-"):
+        entity = "project-editors-%s" % PROJECT_NUMBER
+    if entity.startswith("project-viewers-"):
+        entity = "project-viewers-%s" % PROJECT_NUMBER
+    return entity.lower()
 
 
 # ID
 
 
 def entity_id(entity):
-    return "%s-id-%s" % (entity, PROJECT_ID)
+    return "%s-id-%s" % (entity, PROJECT_NUMBER)
 
 
 # Email
@@ -69,7 +81,7 @@ def entity_email(entity):
     if entity.startswith("user-"):
         return entity[len("user-") :]
     else:
-        return "%s.%s@google.com" % (entity, PROJECT_ID)
+        return "%s.%s@google.com" % (entity, PROJECT_NUMBER)
 
 
 # BucketAccessControl
@@ -81,6 +93,7 @@ def bucket_acl(bucket_name, role, context):
 
 def bucket_entity_acl(bucket_name, entity, role, context):
     acl = resources.BucketAccessControl()
+    entity = canonical_entity(entity) if entity is not None else None
     if role == "OWNER":
         acl.entity = project_entity("owners") if entity is None else entity
         acl.project_team.team = "owners"
@@ -98,7 +111,7 @@ def bucket_entity_acl(bucket_name, entity, role, context):
     acl.email = entity_email(acl.entity)
     acl.id = "%s/acl/%s" % (acl.bucket, acl.entity_id)
     acl.etag = acl.id
-    acl.project_team.project_number = PROJECT_ID
+    acl.project_team.project_number = PROJECT_NUMBER
     return acl
 
 
@@ -143,6 +156,7 @@ def bucket_object_doacl(bucket_name, role, context):
 
 def bucket_entity_doacl(bucket_name, entity, role, context):
     acl = resources.ObjectAccessControl()
+    entity = canonical_entity(entity) if entity is not None else None
     if role == "OWNER":
         acl.entity = project_entity("owners") if entity is None else entity
         acl.project_team.team = "owners"
@@ -155,7 +169,7 @@ def bucket_entity_doacl(bucket_name, entity, role, context):
     acl.entity_id = entity_id(acl.entity)
     acl.email = entity_email(acl.entity)
     acl.etag = "%s/acl/%s" % (bucket_name, acl.entity_id)
-    acl.project_team.project_number = PROJECT_ID
+    acl.project_team.project_number = PROJECT_NUMBER
     return acl
 
 
@@ -193,6 +207,7 @@ def bucket_predefined_doacls(bucket_name, predefined_doacl, context):
 
 def object_entity_acl(bucket_name, object_name, generation, entity, role, context):
     acl = resources.ObjectAccessControl()
+    entity = canonical_entity(entity) if entity is not None else None
     if role == "OWNER":
         acl.entity = project_entity("owners") if entity is None else entity
         acl.project_team.team = "owners"
@@ -213,7 +228,7 @@ def object_entity_acl(bucket_name, object_name, generation, entity, role, contex
     acl.generation = generation
     acl.id = acl.etag
     acl.object = object_name
-    acl.project_team.project_number = PROJECT_ID
+    acl.project_team.project_number = PROJECT_NUMBER
     acl.role = role
     return acl
 

@@ -185,6 +185,7 @@ class Bucket:
 
     @classmethod
     def __search_acl(cls, metadata, entity):
+        entity = gcs_acl.canonical_entity(entity)
         for i in range(len(metadata.acl)):
             if metadata.acl[i].entity == entity:
                 return i
@@ -269,6 +270,7 @@ class Bucket:
 
     @classmethod
     def __search_doacl(cls, metadata, entity):
+        entity = gcs_acl.canonical_entity(entity)
         for i in range(len(metadata.default_object_acl)):
             if metadata.default_object_acl[i].entity == entity:
                 return i

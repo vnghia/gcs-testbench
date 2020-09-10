@@ -241,6 +241,7 @@ class Object:
 
     @classmethod
     def __search_acl(cls, metadata, entity):
+        entity = gcs_acl.canonical_entity(entity)
         for i in range(len(metadata.acl)):
             if metadata.acl[i].entity == entity:
                 return i

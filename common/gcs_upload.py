@@ -60,7 +60,7 @@ class Upload:
                 )
             location = (
                 request.host_url
-                + "upload/storage/v1/b/test-bucket/o?uploadType=resumable"
+                + "upload/storage/v1/b/%s/o?uploadType=resumable" % bucket_name
             )
             headers = {
                 key.lower(): value
