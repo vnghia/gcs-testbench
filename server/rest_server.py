@@ -30,7 +30,7 @@ from common import (
     gcs_upload,
     process,
     error,
-    rest_utils,
+    server_utils,
 )
 
 db = None
@@ -327,7 +327,7 @@ def objects_compose(bucket_name, object_name):
             if source_object.get("objectPreconditions") is not None
             else None
         )
-        fake_request = rest_utils.FakeRequest(args=dict())
+        fake_request = server_utils.FakeRequest(args=dict())
         if generation is not None:
             fake_request.args["generation"] = generation
         if if_generation_match is not None:

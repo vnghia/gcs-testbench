@@ -12,15 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import json
 import re
-from datetime import timezone
-
-import dateutil
 from flatdict import FlatterDict
 from google.protobuf.json_format import MessageToDict
 
-from common import error, hash_utils
+from common import hash_utils
 
 remove_index = re.compile(r":[0-9]+|^[0-9]+")
 split_fields = re.compile(r"[a-zA-Z0-9]*\(.*\)|[a-zA-Z0-9]+")
@@ -71,37 +67,6 @@ def to_dict(source):
         return destination_dict
 
 
-def process_data(data):
-    flat = None
-    if isinstance(data, bytes) or isinstance(data, str):
-        flat = FlatterDict(json.loads(data))
-    elif isinstance(data, dict):
-        flat = FlatterDict(data)
-    else:
-        error.abort(500, "Data must be dict or bytes")
-    delete_keys = []
-    for key in flat.keys():
-        if key.endswith("createdBefore"):
-            flat[key] = (
-                dateutil.parser.parse(flat[key])
-                .replace(tzinfo=timezone.utc)
-                .isoformat()
-            )
-        if "bucketPolicyOnly" in key:
-            new_key = key.replace("bucketPolicyOnly", "uniformBucketLevelAccess", 1)
-            if flat.get(new_key) is None:
-                flat[new_key] = flat[key]
-            delete_keys.append(key)
-        if flat[key] is None:
-            if key.endswith("updated"):
-                delete_keys.append(key)
-        if key == "kind":
-            delete_keys.append(key)
-    for key in delete_keys:
-        del flat[key]
-    return to_dict(flat.as_dict())
-
-
 def fields_to_list(fields):
     if fields is None or not isinstance(fields, str):
         return []
@@ -139,7 +104,7 @@ def message_to_rest(
     delete_key = []
     for key in flat.keys():
         if key.endswith("createdBefore"):
-            flat[key] = dateutil.parser.parse(flat[key]).strftime("%Y-%m-%d")
+            flat[key] = flat[key][0 : len("T00:00:00Z")]
         if key.endswith("crc32c") and not key.endswith("x_testbench_crc32c"):
             flat[key] = hash_utils.base64_int(int(flat[key]))
         if fields is not None:

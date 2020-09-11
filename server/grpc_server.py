@@ -68,9 +68,8 @@ class StorageServicer(storage_pb2_grpc.StorageServicer):
                     )
                 is_resumable = True
             elif first_message == "insert_object_spec":
-                insert_object_spec = request.insert_object_spec
                 upload = gcs_upload.Upload.init(
-                    insert_object_spec.resource.bucket, insert_object_spec, context
+                    request.insert_object_spec.resource.bucket, request, context
                 )
             data = request.WhichOneof("data")
             checksummed_data = None
@@ -120,9 +119,8 @@ class StorageServicer(storage_pb2_grpc.StorageServicer):
         return Empty()
 
     def StartResumableWrite(self, request, context):
-        insert_object_spec = request.insert_object_spec
         upload = gcs_upload.Upload.init(
-            insert_object_spec.resource.bucket, insert_object_spec, context
+            request.insert_object_spec.resource.bucket, request, context
         )
         upload.metadata.metadata["x_testbench_upload"] = "resumable"
         db.insert_upload(upload)

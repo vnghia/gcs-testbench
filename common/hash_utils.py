@@ -43,6 +43,10 @@ def debase64_md5(value):
     return base64.b64decode(value.encode("utf-8")).hex()
 
 
+def debase64_str(value):
+    return base64.b64decode(value.encode("utf-8")).hex()
+
+
 def random_bigint(size=63):
     return random.getrandbits(size)
 

@@ -12,11 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from google.protobuf.json_format import ParseDict
-
-import storage_pb2 as storage
-import utils
-from common import gcs_object, hash_utils, process, rest_utils
+from common import hash_utils, process, server_utils
 
 
 class Rewrite:
@@ -61,7 +57,7 @@ class Rewrite:
         if context is not None:
             pass
         else:
-            fake_request = rest_utils.FakeRequest(
+            fake_request = server_utils.FakeRequest(
                 args=request.args.to_dict(), headers={}, data=request.data
             )
             max_bytes_rewritten_per_call = min(

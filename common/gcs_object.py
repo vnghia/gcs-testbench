@@ -21,8 +21,15 @@ import crc32c
 from google.protobuf.json_format import ParseDict
 
 import storage_resources_pb2 as resources
-import utils
-from common import data_utils, error, gcs_acl, hash_utils, process, rest_utils
+from common import (
+    data_utils,
+    error,
+    gcs_acl,
+    gcs_key,
+    hash_utils,
+    process,
+    server_utils,
+)
 from google.protobuf.field_mask_pb2 import FieldMask
 
 
@@ -88,6 +95,13 @@ class Object:
         metadata.updated.FromDatetime(timestamp)
         metadata.owner.entity = gcs_acl.object_entity("owners")
         metadata.owner.entity_id = gcs_acl.entity_id(metadata.owner.entity)
+        algorithm, key_b64, key_sha256_b64 = gcs_key.extract_csek(
+            request, False, context
+        )
+        if algorithm != "":
+            gcs_key.check_csek(algorithm, key_b64, key_sha256_b64, context)
+            metadata.customer_encryption.encryption_algorithm = algorithm
+            metadata.customer_encryption.key_sha256 = key_sha256_b64
         cls.__update_predefined_acl(request, metadata, True, is_destination, context)
         return Object(metadata, media)
 
@@ -98,7 +112,7 @@ class Object:
 
     @classmethod
     def init_multipart(cls, bucket_name, request):
-        metadata, media_headers, media = rest_utils.parse_multipart(request)
+        metadata, media_headers, media = server_utils.parse_multipart(request)
         metadata["name"] = request.args.get("name", metadata.get("name", None))
         if metadata["name"] is None:
             error.abort(412, "name not set in Objects: insert", None)
@@ -129,7 +143,6 @@ class Object:
         if "crc32c" in metadata:
             metadata["metadata"]["x_testbench_crc32c"] = metadata["crc32c"]
             metadata["crc32c"] = hash_utils.debase64_crc32c(metadata["crc32c"])
-        metadata.update(utils.extract_encryption(request))
         return cls.init_dict(metadata, media, False, request)
 
     @classmethod
@@ -155,13 +168,13 @@ class Object:
         }
         if "content-type" in request.headers:
             metadata["contentType"] = request.headers["content-type"]
-        fake_request = rest_utils.FakeRequest(args=request.args.to_dict())
+        fake_request = server_utils.FakeRequest(args=request.args.to_dict())
         fake_request.headers = {
             key.lower(): value
             for key, value in request.headers.items()
             if key.lower().startswith("x-goog-")
         }
-        rest_utils.xml_headers_to_json_args(fake_request.headers, fake_request.args)
+        server_utils.xml_headers_to_json_args(fake_request.headers, fake_request.args)
         x_goog_hash = fake_request.headers.get("x-goog-hash")
         if x_goog_hash is not None:
             for checksum in x_goog_hash.split(","):

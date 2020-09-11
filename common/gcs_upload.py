@@ -20,7 +20,7 @@ import flask
 from google.protobuf.json_format import ParseDict
 import storage_resources_pb2 as resources
 
-from common import error, process, rest_utils
+from common import error, server_utils
 
 content_range_split = re.compile(r"bytes (\*|[0-9]+-[0-9]+)\/(\*|[0-9]+)")
 
@@ -39,7 +39,10 @@ class Upload:
         # TODO(vnvo2409): Construct request for both gRPC and REST
         metadata, location = None, ""
         if context is not None:
-            metadata = request.resource
+            fake_request = server_utils.FakeRequest.init_protobuf(request, context)
+            fake_request.update_protobuf(request.insert_object_spec, context)
+            metadata = request.insert_object_spec.resource
+            request = fake_request
         else:
             name = request.args.get("name", "")
             if len(request.data) > 0:
@@ -50,7 +53,7 @@ class Upload:
                         context,
                     )
                 data = json.loads(request.data)
-                metadata = ParseDict(process.process_data(data), resources.Object())
+                metadata = ParseDict(data, resources.Object())
             else:
                 metadata = resources.Object()
                 metadata.name = name
@@ -67,7 +70,7 @@ class Upload:
                 for key, value in request.headers.items()
                 if key.lower().startswith("x-")
             }
-            request = rest_utils.FakeRequest(
+            request = server_utils.FakeRequest(
                 args=request.args.to_dict(), headers=headers, data=b""
             )
         if metadata.name == "":
